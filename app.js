@@ -50,8 +50,11 @@ function friendlyErrorMessage(e) {
 }
 
 function apiGet(action, params) {
-  if (!CONFIG || !CONFIG.API_URL || CONFIG.API_URL.indexOf('YOUR_DEPLOYMENT_ID_HERE') !== -1) {
-    return Promise.reject(new Error('ยังไม่ได้ตั้งค่า API_URL ใน config.js — กรุณา Deploy Apps Script แล้วนำ URL มาใส่ก่อนใช้งาน'));
+  // ใช้ typeof เช็คแทน !CONFIG ตรงๆ เพราะถ้าไฟล์ config.js โหลดไม่สำเร็จ (404/พาธผิด)
+  // การอ้างถึงตัวแปร CONFIG ที่ไม่เคยถูกประกาศเลยจะทำให้เกิด ReferenceError ทันที (ไม่ใช่แค่ค่า false/undefined)
+  // ซึ่งจะทำให้ทั้งหน้าค้างที่ "กำลังโหลด..." ตลอดไปโดยไม่มีข้อความ error ให้เห็นเลย
+  if (typeof CONFIG === 'undefined' || !CONFIG.API_URL || CONFIG.API_URL.indexOf('YOUR_DEPLOYMENT_ID_HERE') !== -1) {
+    return Promise.reject(new Error('ยังไม่ได้ตั้งค่า API_URL ใน config.js หรือไฟล์ config.js โหลดไม่สำเร็จ (ตรวจว่าไฟล์ config.js อยู่ในโฟลเดอร์เดียวกับ index.html และ push ขึ้น GitHub แล้วจริง)'));
   }
   var url = CONFIG.API_URL + '?action=' + encodeURIComponent(action);
   if (params) {
@@ -72,8 +75,8 @@ function apiGet(action, params) {
 
 // payload ต้องเป็น plain object เสมอ (ไม่ใช่ FormData) — ส่งเป็น text/plain กัน CORS preflight ที่ Apps Script ตอบไม่ได้
 function apiPost(action, payload) {
-  if (!CONFIG || !CONFIG.API_URL || CONFIG.API_URL.indexOf('YOUR_DEPLOYMENT_ID_HERE') !== -1) {
-    return Promise.reject(new Error('ยังไม่ได้ตั้งค่า API_URL ใน config.js — กรุณา Deploy Apps Script แล้วนำ URL มาใส่ก่อนใช้งาน'));
+  if (typeof CONFIG === 'undefined' || !CONFIG.API_URL || CONFIG.API_URL.indexOf('YOUR_DEPLOYMENT_ID_HERE') !== -1) {
+    return Promise.reject(new Error('ยังไม่ได้ตั้งค่า API_URL ใน config.js หรือไฟล์ config.js โหลดไม่สำเร็จ (ตรวจว่าไฟล์ config.js อยู่ในโฟลเดอร์เดียวกับ index.html และ push ขึ้น GitHub แล้วจริง)'));
   }
   var requestId = genRequestId();
   var body = JSON.stringify({ action: action, requestId: requestId, payload: payload || {} });
@@ -135,14 +138,23 @@ function employeeOptions(list) { return list.map(function (e) { return '<option 
 
 /* ===================== boot ===================== */
 function boot() {
-  apiGet('bootstrap', {}).then(function (data) {
-    APP.employees = data.employees; APP.departments = data.departments;
-    APP.errorTypes = data.errorTypes; APP.severityLevels = data.severityLevels;
-    APP.month = data.month; APP.year = data.year;
-    renderShell();
-  }).catch(function (e) {
-    document.getElementById('content').innerHTML = '<div class="card"><h3>โหลดไม่สำเร็จ</h3><p class="muted">' + esc(e.message || e) + '</p><button class="btn secondary" onclick="boot()">ลองใหม่อีกครั้ง</button></div>';
-  });
+  // ห่อด้วย try/catch กันไว้อีกชั้น: ถ้ามีอะไร throw แบบ synchronous ก่อนถึง .catch() (เช่น config.js โหลดไม่สำเร็จ)
+  // อย่างน้อยหน้าเว็บต้องเปลี่ยนจาก "กำลังโหลด..." เป็นข้อความ error ให้เห็น ไม่ใช่ค้างเฉยๆ ตลอดไป
+  try {
+    apiGet('bootstrap', {}).then(function (data) {
+      APP.employees = data.employees; APP.departments = data.departments;
+      APP.errorTypes = data.errorTypes; APP.severityLevels = data.severityLevels;
+      APP.month = data.month; APP.year = data.year;
+      renderShell();
+    }).catch(function (e) { showBootError(e); });
+  } catch (e) {
+    showBootError(e);
+  }
+}
+
+function showBootError(e) {
+  var el = document.getElementById('content');
+  if (el) el.innerHTML = '<div class="card"><h3>โหลดไม่สำเร็จ</h3><p class="muted">' + esc((e && e.message) || e) + '</p><button class="btn secondary" onclick="boot()">ลองใหม่อีกครั้ง</button></div>';
 }
 
 function renderShell() {
