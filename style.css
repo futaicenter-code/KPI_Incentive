@@ -1,0 +1,58 @@
+:root {
+  --blue: #2563eb; --blue-dark: #1d4ed8; --green: #16a34a; --red: #dc2626;
+  --bg: #f3f4f6; --card: #ffffff; --text: #1f2937; --muted: #6b7280; --border: #e5e7eb;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: "Sarabun", "Segoe UI", system-ui, -apple-system, sans-serif;
+  padding-bottom: 72px;
+}
+header.app-header {
+  background: var(--blue); color: #fff; padding: 14px 16px; position: sticky; top: 0; z-index: 20;
+  display: flex; justify-content: space-between; align-items: center;
+}
+header.app-header .title { font-weight: 700; font-size: 17px; }
+header.app-header a.modeLink { color: #dbeafe; font-size: 12px; text-decoration: underline; cursor: pointer; }
+#content { padding: 12px; max-width: 720px; margin: 0 auto; }
+.card { background: var(--card); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.06); border: 1px solid var(--border); }
+.card h3 { margin: 0 0 10px; font-size: 15px; color: var(--blue-dark); }
+label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+input[type=text], input[type=number], input[type=date], select, textarea {
+  width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px;
+  font-size: 14px; font-family: inherit; background: #fff; color: var(--text);
+}
+textarea { min-height: 56px; resize: vertical; }
+button.btn { background: var(--blue); color: #fff; border: none; border-radius: 8px; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 10px; }
+button.btn:active { background: var(--blue-dark); }
+button.btn:disabled { opacity: .6; cursor: not-allowed; }
+button.btn.secondary { background: #fff; color: var(--blue); border: 1px solid var(--blue); }
+button.btn.danger { background: var(--red); }
+button.btn.small { padding: 6px 10px; font-size: 12px; margin: 2px 4px 2px 0; }
+.row { display: flex; gap: 10px; }
+.row > * { flex: 1; }
+.list-item { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.list-item:last-child { border-bottom: none; }
+.list-item .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+nav.tabbar { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid var(--border); display: flex; overflow-x: auto; z-index: 20; padding: 4px 2px; }
+nav.tabbar button { flex: 0 0 auto; background: none; border: none; padding: 8px 12px; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; border-radius: 8px; }
+nav.tabbar button.active { color: var(--blue); font-weight: 700; background: #eff6ff; }
+.checklist { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+.checklist label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin: 6px 0; }
+.checklist input { width: auto; }
+.muted { color: var(--muted); font-size: 12px; }
+.center { text-align: center; }
+.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: #111827; color: #fff; padding: 10px 18px; border-radius: 999px; font-size: 13px; z-index: 50; opacity: 0; transition: opacity .25s; pointer-events: none; }
+.toast.show { opacity: 1; }
+.toast.error { background: var(--red); }
+table.simple { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.simple th, table.simple td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.month-picker { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.month-picker select { width: auto; }
+.pill { display: inline-block; background: #eff6ff; color: var(--blue-dark); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600; }
+.lineItem { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+.lineItem button { background: none; border: none; color: var(--red); cursor: pointer; font-size: 12px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.badge.pending { background: #fef3c7; color: #92400e; }
+.badge.approved { background: #dcfce7; color: #166534; }
+.badge.rejected { background: #fee2e2; color: #991b1b; }
