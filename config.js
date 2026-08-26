@@ -8,5 +8,5 @@
 var CONFIG = {
   // แก้ URL นี้เป็น URL จริงที่ได้จากตอน Deploy > New deployment > Web app ของ Apps Script
   // ต้องลงท้ายด้วย /exec เสมอ (ไม่ใช่ /dev)
-  API_URL: "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID_HERE/exec"
+  API_URL: "https://script.google.com/macros/s/AKfycbxtMUyN2nCmKdzDWnutsIJkkWVknrV5z93upEAtkDUu5cCLGRWeoqFGxZWJRTgMdMg/exec"
 };
