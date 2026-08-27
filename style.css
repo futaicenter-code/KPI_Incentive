@@ -1,0 +1,308 @@
+/* =====================================================================
+   FUTAI — Design System (UI/UX Redesign)
+   ห้ามใส่ Business Logic ใดๆ ในไฟล์นี้ — เป็น Visual Layer ล้วนๆ
+   Layout: Sidebar (Desktop) / Bottom Nav (Mobile) ใช้ element เดิม #tabbar
+   ตัวเดียวกับที่ app.js สร้างปุ่มแท็บ Admin อยู่แล้ว (แค่ปรับ CSS ให้เปลี่ยนหน้าตา
+   ตามขนาดจอ ไม่ได้เพิ่ม/เปลี่ยน element หรือ Logic การคลิกใดๆ)
+   ===================================================================== */
+
+@font-face { font-family: "Sarabun"; font-display: swap; }
+
+:root {
+  /* --- Brand palette: Coral (primary) + Blue (secondary) บนพื้นครีม/ขาว --- */
+  --coral: #ff6b57;
+  --coral-dark: #e8543f;
+  --coral-light: #fff1ee;
+  --blue: #3b6df0;
+  --blue-dark: #2d54c4;
+  --blue-light: #eef2ff;
+  --green: #1fa971;
+  --green-light: #e7f8f0;
+  --amber: #d97706;
+  --amber-light: #fef3c7;
+  --red: #e5484d;
+  --red-light: #fdeceb;
+
+  --bg: #faf6f1;
+  --bg-alt: #f3ede4;
+  --card: #ffffff;
+  --text: #2a2622;
+  --text-soft: #57514a;
+  --muted: #948d84;
+  --border: #ece5db;
+  --border-strong: #ddd3c6;
+
+  --radius-lg: 18px;
+  --radius-md: 13px;
+  --radius-sm: 9px;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 1px 2px rgba(60, 45, 30, .05);
+  --shadow-md: 0 6px 20px -6px rgba(60, 45, 30, .14);
+  --shadow-lg: 0 16px 40px -12px rgba(60, 45, 30, .22);
+
+  --sidebar-w: 232px;
+  --header-h: 68px;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: "Sarabun", "Segoe UI", system-ui, -apple-system, sans-serif;
+  padding-bottom: 78px; /* เผื่อพื้นที่ bottom nav บนมือถือ */
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4 { font-family: inherit; margin: 0; }
+::selection { background: var(--coral-light); color: var(--coral-dark); }
+
+/* ===================== HEADER ===================== */
+header.app-header {
+  background: var(--card); color: var(--text); padding: 14px 20px;
+  position: sticky; top: 0; z-index: 30;
+  display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+header.app-header .headerText { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+header.app-header .title { font-weight: 800; font-size: 17px; letter-spacing: .1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+header.app-header .subtitle { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+header.app-header a.modeLink {
+  color: var(--coral-dark); background: var(--coral-light); border: 1px solid #ffd9d0;
+  font-size: 12.5px; font-weight: 700; text-decoration: none; cursor: pointer;
+  padding: 8px 14px; border-radius: var(--radius-pill); white-space: nowrap;
+  transition: background .15s, transform .1s;
+}
+header.app-header a.modeLink:hover { background: #ffe3dc; }
+header.app-header a.modeLink:active { transform: scale(.97); }
+
+/* ===================== APP SHELL / CONTENT ===================== */
+#content { padding: 16px; max-width: 880px; margin: 0 auto; }
+
+/* ===================== NAV — #tabbar: Sidebar (desktop) / Bottom bar (mobile) ===================== */
+nav.tabbar {
+  position: fixed; z-index: 40; background: var(--card);
+  /* Mobile default: bottom bar */
+  bottom: 0; left: 0; right: 0; top: auto;
+  display: flex; flex-direction: row; overflow-x: auto; overflow-y: hidden;
+  border-top: 1px solid var(--border); box-shadow: 0 -4px 16px rgba(60,45,30,.06);
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+  gap: 2px;
+}
+nav.tabbar::-webkit-scrollbar { display: none; }
+nav.tabbar button {
+  flex: 0 0 auto; background: none; border: none; padding: 7px 13px; font-size: 11.5px;
+  color: var(--muted); white-space: nowrap; cursor: pointer; border-radius: var(--radius-sm);
+  font-family: inherit; font-weight: 600; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  transition: background .15s, color .15s;
+}
+nav.tabbar button .navIcon { font-size: 16px; line-height: 1; }
+nav.tabbar button:hover { background: var(--bg-alt); color: var(--text-soft); }
+nav.tabbar button.active { color: var(--coral-dark); background: var(--coral-light); }
+
+@media (min-width: 900px) {
+  header.app-header { margin-left: var(--sidebar-w); }
+  #content { margin-left: var(--sidebar-w); max-width: 1040px; padding: 24px 28px 60px; }
+  nav.tabbar {
+    top: 0; bottom: 0; left: 0; right: auto; width: var(--sidebar-w);
+    flex-direction: column; align-items: stretch; justify-content: flex-start;
+    border-top: none; border-right: 1px solid var(--border); box-shadow: none;
+    padding: 18px 12px; gap: 3px; overflow-y: auto;
+  }
+  nav.tabbar::before {
+    content: "FUTAI"; display: block; font-weight: 900; font-size: 20px; letter-spacing: .5px;
+    color: var(--coral-dark); padding: 4px 12px 18px;
+  }
+  nav.tabbar button {
+    flex-direction: row; justify-content: flex-start; gap: 10px; font-size: 13.5px;
+    padding: 10px 12px; width: 100%; text-align: left;
+  }
+  nav.tabbar button .navIcon { font-size: 17px; }
+  nav.tabbar button.active { box-shadow: inset 3px 0 0 var(--coral); }
+  body { padding-bottom: 0; }
+}
+
+/* ===================== CARDS ===================== */
+.card {
+  background: var(--card); border-radius: var(--radius-lg); padding: 18px 20px; margin-bottom: 16px;
+  box-shadow: var(--shadow-sm); border: 1px solid var(--border);
+}
+.card h3 { margin: 0 0 4px; font-size: 15.5px; color: var(--text); font-weight: 800; display: flex; align-items: center; gap: 8px; }
+.card .cardSubtitle { font-size: 12.5px; color: var(--muted); margin: 0 0 14px; }
+.card.center { text-align: center; }
+.sectionDivider { border: none; border-top: 1px dashed var(--border); margin: 16px 0; }
+
+/* ===================== FORM ELEMENTS ===================== */
+label { display: block; font-size: 12.5px; font-weight: 700; color: var(--text-soft); margin: 14px 0 6px; }
+label:first-of-type { margin-top: 2px; }
+input[type=text], input[type=number], input[type=date], select, textarea {
+  width: 100%; padding: 11px 13px; border: 1.5px solid var(--border); border-radius: var(--radius-md);
+  font-size: 14px; font-family: inherit; background: #fff; color: var(--text);
+  transition: border-color .15s, box-shadow .15s;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--coral); box-shadow: 0 0 0 3px var(--coral-light);
+}
+input::placeholder, textarea::placeholder { color: #c4bcb0; }
+textarea { min-height: 64px; resize: vertical; }
+select { cursor: pointer; appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23948d84'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 16px; padding-right: 36px;
+}
+.muted { color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+.center { text-align: center; }
+.row { display: flex; gap: 12px; }
+.row > * { flex: 1; min-width: 0; }
+
+/* ===================== BUTTONS ===================== */
+button.btn {
+  background: var(--coral); color: #fff; border: none; border-radius: var(--radius-md); padding: 12px 20px;
+  font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; margin-top: 14px;
+  box-shadow: 0 4px 12px -4px rgba(255,107,87,.55);
+  transition: background .15s, transform .08s, box-shadow .15s;
+}
+button.btn:hover { background: var(--coral-dark); box-shadow: 0 6px 16px -4px rgba(232,84,63,.55); }
+button.btn:active { transform: scale(.98); }
+button.btn:disabled { opacity: .65; cursor: not-allowed; transform: none; box-shadow: none; }
+button.btn.secondary { background: #fff; color: var(--text); border: 1.5px solid var(--border-strong); box-shadow: none; }
+button.btn.secondary:hover { background: var(--bg-alt); }
+button.btn.blue { background: var(--blue); box-shadow: 0 4px 12px -4px rgba(59,109,240,.5); }
+button.btn.blue:hover { background: var(--blue-dark); }
+button.btn.danger { background: var(--red); box-shadow: none; }
+button.btn.danger:hover { background: #cf3438; }
+button.btn.small { padding: 7px 12px; font-size: 12px; margin: 2px 4px 2px 0; box-shadow: none; }
+button.btn.ghost { background: none; color: var(--muted); box-shadow: none; padding: 6px 10px; }
+button.btn.ghost:hover { color: var(--text); background: var(--bg-alt); }
+
+/* ===================== TOAST ===================== */
+.toast {
+  position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%) translateY(8px);
+  background: #221f1c; color: #fff; padding: 12px 20px 12px 16px; border-radius: var(--radius-pill);
+  font-size: 13.5px; font-weight: 600; z-index: 90; opacity: 0; transition: opacity .25s, transform .25s;
+  pointer-events: none; box-shadow: var(--shadow-lg); display: flex; align-items: center; gap: 8px; max-width: 92vw;
+}
+.toast::before { content: "✓"; display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%; background: var(--green); font-size: 11px; flex: 0 0 auto; }
+.toast.error::before { content: "!"; background: var(--red); }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.error { background: #3a1616; }
+@media (min-width: 900px) { .toast { bottom: 28px; } }
+
+/* ===================== LISTS / TIMELINE ===================== */
+.list-item { padding: 12px 2px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+.list-item:last-child { border-bottom: none; }
+.list-item .meta { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+.timeline { position: relative; }
+.timeline .list-item { padding-left: 20px; position: relative; }
+.timeline .list-item::before {
+  content: ""; position: absolute; left: 2px; top: 18px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--coral);
+}
+.timeline .list-item::after {
+  content: ""; position: absolute; left: 5.5px; top: 26px; bottom: 0; width: 1px; background: var(--border);
+}
+.timeline .list-item:last-child::after { display: none; }
+
+/* ===================== CHECKLIST ===================== */
+.checklist { max-height: 220px; overflow-y: auto; border: 1.5px solid var(--border); border-radius: var(--radius-md); padding: 10px; }
+.checklist label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin: 7px 0; font-weight: 500; }
+.checklist input { width: auto; }
+
+/* ===================== TABLE ===================== */
+table.simple { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.simple th { text-align: left; padding: 10px 10px; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 1.5px solid var(--border); }
+table.simple td { text-align: left; padding: 11px 10px; border-bottom: 1px solid var(--border); }
+table.simple tr:last-child td { border-bottom: none; }
+table.simple tr:hover td { background: var(--bg-alt); }
+table.simple .colDivider { border-left: 2px solid var(--border); }
+table.simple .totalCell { color: var(--coral-dark); font-weight: 800; }
+table.simple .moneyCell { color: var(--green); font-weight: 800; }
+
+/* ===================== MONTH PICKER ===================== */
+.month-picker { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+.month-picker select { width: auto; }
+.month-picker button.small { margin-top: 0; }
+
+/* ===================== BADGES / PILLS ===================== */
+.pill { display: inline-block; background: var(--blue-light); color: var(--blue-dark); border-radius: var(--radius-pill); padding: 4px 12px; font-size: 12px; font-weight: 700; }
+.badge { display: inline-block; padding: 3px 10px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 700; letter-spacing: .2px; }
+.badge.pending { background: var(--amber-light); color: #92400e; }
+.badge.approved { background: var(--green-light); color: #0f6b48; }
+.badge.rejected { background: var(--red-light); color: #a3242a; }
+
+/* ===================== LINE ITEM (pending list ก่อนบันทึก) ===================== */
+.lineItem {
+  display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; margin-bottom: 6px;
+  border-radius: var(--radius-sm); background: var(--bg-alt); font-size: 13px;
+}
+.lineItem button { background: none; border: none; color: var(--red); cursor: pointer; font-size: 12px; font-weight: 700; padding: 2px 6px; }
+
+/* ===================== STAT CARDS (Dashboard) ===================== */
+.statGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 4px; }
+.statCard { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 18px; box-shadow: var(--shadow-sm); }
+.statCard .statIcon { font-size: 20px; margin-bottom: 8px; display: block; }
+.statCard .statLabel { font-size: 12px; color: var(--muted); font-weight: 700; margin-bottom: 4px; }
+.statCard .statValue { font-size: 24px; font-weight: 800; color: var(--text); line-height: 1.1; }
+.statCard .statValue .statMax { font-size: 13px; color: var(--muted); font-weight: 600; }
+.statCard.accentCoral { border-color: #ffd9cf; background: linear-gradient(180deg, #fff8f6, #fff); }
+.statCard.accentBlue { border-color: #cfdcfb; background: linear-gradient(180deg, #f6f9ff, #fff); }
+.statCard.accentGreen { border-color: #c7ecdb; background: linear-gradient(180deg, #f4fcf8, #fff); }
+.statCard.accentAmber { border-color: #fbe3ad; background: linear-gradient(180deg, #fffaf0, #fff); }
+
+/* ===================== PROGRESS BAR ===================== */
+.progressTrack { background: var(--bg-alt); border-radius: var(--radius-pill); height: 10px; overflow: hidden; margin-top: 8px; }
+.progressFill { height: 100%; border-radius: var(--radius-pill); background: linear-gradient(90deg, var(--coral), var(--coral-dark)); transition: width .3s ease; }
+.progressFill.blue { background: linear-gradient(90deg, var(--blue), var(--blue-dark)); }
+.progressFill.green { background: linear-gradient(90deg, #2bc98a, var(--green)); }
+.progressLabel { display: flex; justify-content: space-between; align-items: baseline; margin-top: 14px; }
+.progressLabel .bigNum { font-size: 26px; font-weight: 800; color: var(--text); }
+.progressLabel .bigNum .slash { color: var(--muted); font-weight: 600; font-size: 16px; }
+
+/* ===================== SELECTABLE CARDS (ผลกระทบ / ระดับความรุนแรง) ===================== */
+.cardSelectGroup { display: flex; flex-direction: column; gap: 8px; }
+.cardSelectOption {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  border: 1.5px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; cursor: pointer;
+  background: #fff; transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.cardSelectOption:hover { border-color: var(--border-strong); background: var(--bg-alt); }
+.cardSelectOption .optLeft { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.cardSelectOption .optDot {
+  width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border-strong); flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center; font-size: 11px; color: transparent; transition: all .15s;
+}
+.cardSelectOption .optText { min-width: 0; }
+.cardSelectOption .optTitle { font-weight: 700; font-size: 13.5px; color: var(--text); }
+.cardSelectOption .optDesc { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+.cardSelectOption .optPoints { font-weight: 800; font-size: 13.5px; color: var(--muted); flex: 0 0 auto; }
+.cardSelectOption.selected { border-color: var(--coral); background: var(--coral-light); box-shadow: 0 0 0 3px rgba(255,107,87,.12); }
+.cardSelectOption.selected .optDot { background: var(--coral); border-color: var(--coral); color: #fff; }
+.cardSelectOption.selected .optPoints { color: var(--coral-dark); }
+.cardSelectOption.levelHigh.selected { border-color: var(--red); background: var(--red-light); box-shadow: 0 0 0 3px rgba(229,72,77,.12); }
+.cardSelectOption.levelHigh.selected .optDot { background: var(--red); border-color: var(--red); }
+.cardSelectOption.levelHigh.selected .optPoints { color: var(--red); }
+
+/* ===================== CHIP ROW (ผู้รับผิดชอบ) ===================== */
+.chipRow { display: flex; align-items: center; gap: 8px; background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 8px 8px 12px; margin-bottom: 8px; }
+.chipRow select { border: none; background: none; padding: 4px 0; box-shadow: none; }
+.chipRow select:focus { box-shadow: none; }
+.chipRow .chipRemove {
+  flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; border: none; background: #fff;
+  color: var(--red); font-size: 13px; font-weight: 800; cursor: pointer; box-shadow: var(--shadow-sm);
+}
+.chipRow .chipRemove:hover { background: var(--red-light); }
+
+/* ===================== SUMMARY CALLOUT (Reward vs Performance ฯลฯ) ===================== */
+.calloutBox { background: var(--blue-light); border: 1px solid #cfdcfb; border-radius: var(--radius-md); padding: 12px 14px; font-size: 12.5px; color: var(--blue-dark); line-height: 1.6; }
+.calloutBox.amber { background: var(--amber-light); border-color: #fbe3ad; color: #7a4a06; }
+
+/* ===================== SKELETON LOADING ===================== */
+.skeleton { background: linear-gradient(90deg, var(--bg-alt) 25%, #efe8dd 37%, var(--bg-alt) 63%); background-size: 400% 100%; animation: skeletonShine 1.4s ease infinite; border-radius: var(--radius-sm); height: 14px; margin: 6px 0; }
+@keyframes skeletonShine { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+/* ===================== HIDDEN NATIVE SELECT (ใช้กับ Card-Select) ===================== */
+.hiddenSelect { display: none; }
+
+/* ===================== MISC ===================== */
+a { color: var(--coral-dark); }
+.mt0 { margin-top: 0 !important; }
