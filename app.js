@@ -149,6 +149,8 @@ function monthPickerHtml(id, month, year) {
 }
 
 function employeeOptions(list) { return list.map(function (e) { return '<option value="' + e.id + '">' + esc(e.name) + '</option>'; }).join(''); }
+// ใช้เฉพาะจุดที่ผู้รับผิดชอบ/ผู้แจ้งอาจมาจากคนละแผนกกัน (เช่นหน้า Error) — โชว์แผนกต่อท้ายชื่อในตัวเลือกเลย ไม่ต้องเดา/สลับไปเช็คที่อื่น
+function employeeOptionsWithDept(list) { return list.map(function (e) { return '<option value="' + e.id + '">' + esc(e.name) + (e.department ? ' — ' + esc(e.department) : '') + '</option>'; }).join(''); }
 
 /* ===================== UI-ONLY HELPER: Card-Select ═════════════════════
    ครอบ <select> เดิมด้วยการ์ดให้คลิกเลือกได้ (Radio Card) โดย <select> ตัวเดิม
@@ -606,7 +608,6 @@ function renderAdminSalesMonthly(kind) {
 // ผู้รับผิดชอบใช้แบบ "+ เพิ่มผู้รับผิดชอบ" ทีละแถว (เพิ่ม/ลบได้ไม่จำกัด) แทน Checklist รายชื่อทั้งหมด
 // เริ่มต้นด้วย 1 แถวว่างให้เลยเพื่อไม่ต้องกดเพิ่มเองตั้งแต่แถวแรก
 function renderAdminError() {
-  var deptOptions = APP.departments.map(function (d) { return '<option value="' + d + '">' + d + '</option>'; }).join('');
   // PHASE 1 (รอบแก้ Error 5 ระดับ): "ประเภทความผิด" ไม่ผูกระดับความรุนแรงแล้ว (ตัด data-severity ออก) — ระดับเริ่มต้นมาจาก
   // Dropdown "ผลกระทบ" แยกต่างหากด้านล่างแทน เพราะ Error ประเภทเดียวกันเกิดผลกระทบต่างกันได้ในแต่ละครั้ง
   var typeOptions = APP.errorTypes.map(function (t) { return '<option value="' + t['รหัสประเภท'] + '">' + esc(t['ชื่อประเภทความผิด']) + '</option>'; }).join('');
@@ -627,17 +628,17 @@ function renderAdminError() {
     '<div class="card"><h3>⚠️ บันทึกความผิด</h3><div class="cardSubtitle">บันทึกและติดตามเหตุการณ์ความผิดพลาดในการทำงาน</div>' +
     '<div id="eMonthStats" class="statGrid mt0"></div></div>' +
 
-    '<div class="card"><h3>👥 ผู้รับผิดชอบ &amp; ผู้แจ้ง</h3><div class="cardSubtitle">ทุกคนได้คะแนนเต็มตามระดับ ไม่หารเฉลี่ย</div>' +
+    '<div class="card"><h3>👥 ผู้รับผิดชอบ &amp; ผู้แจ้ง</h3><div class="cardSubtitle">ทุกคนได้คะแนนเต็มตามระดับ ไม่หารเฉลี่ย — เลือกได้แม้ผู้รับผิดชอบมาจากคนละแผนกกัน (ระบบแยกแผนกให้อัตโนมัติ ดูด้านล่าง)</div>' +
     '<label>ผู้รับผิดชอบ</label>' +
     '<div id="eRespRows"></div>' +
     '<button class="btn secondary small" id="eAddResp">+ เพิ่มผู้รับผิดชอบ</button>' +
     '<label style="margin-top:18px;">ผู้แจ้งปัญหา (ถ้ามี — เว้นว่างได้ถ้าไม่มีคนแจ้งเป็นพิเศษ เช่นหัวหน้าเจอเอง)</label>' +
-    '<select id="eReporter"><option value="">— ไม่มี / ไม่ระบุ —</option>' + employeeOptions(APP.employees) + '</select>' +
+    '<select id="eReporter"><option value="">— ไม่มี / ไม่ระบุ —</option>' + employeeOptionsWithDept(APP.employees) + '</select>' +
     '<div class="muted" id="eReporterHint" style="display:none;"></div></div>' +
 
     '<div class="card"><h3>📋 ข้อมูลเหตุการณ์</h3>' +
     '<div class="row"><div><label>วันที่เกิดเหตุ</label><input type="date" id="eDate" value="' + todayStr() + '"></div>' +
-    '<div><label>แผนก</label><select id="eDept">' + deptOptions + '</select></div></div>' +
+    '<div><label>แผนก (อัตโนมัติจากผู้รับผิดชอบที่เลือกด้านบน)</label><input type="text" id="eDept" readonly placeholder="— เลือกผู้รับผิดชอบก่อน —"></div></div>' +
     '<label>ประเภทความผิด</label><select id="eType">' + typeOptions + '</select>' +
     '<label>รายละเอียดเหตุการณ์</label><textarea id="eDesc"></textarea>' +
     '<label>ค่าเสียหายจริง (บาท ถ้ามี — ไม่มีผลต่อคะแนน)</label><input type="number" id="eDamage"></div>' +
@@ -673,23 +674,37 @@ function renderAdminError() {
   }
   document.getElementById('eReporter').addEventListener('change', syncReporterHint);
 
+  // "แผนก" ไม่ให้เลือกเองแยกต่างหากแล้ว — ดึงมาจากแผนกของผู้รับผิดชอบที่เลือกไว้ด้านบนโดยตรง (กันต้องมานั่งกดเลือกซ้ำ
+  // และกันแผนกไม่ตรงกับตัวคนที่เลือกจริง) ถ้าผู้รับผิดชอบมาจากคนละแผนกกัน จะรวมชื่อแผนกทั้งหมดมาแสดง (คั่นด้วย , )
+  // ฟิลด์นี้เป็นแค่ข้อมูลอ้างอิง/รายงาน ไม่มีผลต่อคะแนนหรือเงินใดๆ เลย (คะแนนหักจากระดับความรุนแรงต่อคนเท่านั้น)
+  function syncDeptFromResponsible() {
+    var responsibleIds = Array.prototype.slice.call(document.querySelectorAll('.eRespSel')).map(function (s) { return s.value; }).filter(Boolean);
+    var depts = [];
+    responsibleIds.forEach(function (id) {
+      var emp = APP.employees.filter(function (e) { return e.id === id; })[0];
+      if (emp && emp.department && depts.indexOf(emp.department) === -1) depts.push(emp.department);
+    });
+    document.getElementById('eDept').value = depts.join(', ');
+  }
+
   var respCount = 0;
   function addRespRow() {
     respCount++;
     var row = document.createElement('div');
     row.className = 'chipRow';
-    row.innerHTML = '<select class="eRespSel">' + employeeOptions(APP.employees) + '</select>' +
+    row.innerHTML = '<select class="eRespSel">' + employeeOptionsWithDept(APP.employees) + '</select>' +
       '<button class="chipRemove eRespRemove" type="button" title="ลบ">✕</button>';
     document.getElementById('eRespRows').appendChild(row);
-    row.querySelector('.eRespSel').addEventListener('change', syncReporterHint);
+    row.querySelector('.eRespSel').addEventListener('change', function () { syncReporterHint(); syncDeptFromResponsible(); });
     row.querySelector('.eRespRemove').addEventListener('click', function () {
       row.remove();
       if (!document.querySelectorAll('.eRespSel').length) addRespRow(); // เหลืออย่างน้อย 1 แถวเสมอ
-      syncReporterHint();
+      syncReporterHint(); syncDeptFromResponsible();
     });
   }
-  document.getElementById('eAddResp').addEventListener('click', function () { addRespRow(); syncReporterHint(); });
+  document.getElementById('eAddResp').addEventListener('click', function () { addRespRow(); syncReporterHint(); syncDeptFromResponsible(); });
   addRespRow(); // เริ่มด้วย 1 แถวว่างให้เลย
+  syncDeptFromResponsible();
 
   // PHASE 1 (รอบแก้ Error 5 ระดับ): "ผลกระทบ" เป็นตัวกำหนดระดับความรุนแรงเริ่มต้น (ไม่ใช่ "ประเภทความผิด" อีกต่อไป)
   function syncSeverityToImpact() {
