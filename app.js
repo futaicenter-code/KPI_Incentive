@@ -140,7 +140,15 @@ function setValIfExists(id, v) { var el = document.getElementById(id); if (el) e
 function setTextIfExists(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
 function esc(s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 function fmtDate(v) { if (!v) return ''; var d = new Date(v); if (isNaN(d)) return String(v); return ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + '/' + d.getFullYear(); }
-function fmtNum(v) { if (typeof v === 'number') return (Math.round(v * 100) / 100).toString(); return v === undefined || v === null || v === '' ? '-' : String(v); }
+// เลขทุกจุดในเว็บแอพ (คะแนน/จำนวน/ยอดเงิน) ใช้ตัวนี้ตัวเดียวกันหมด — เติมจุลภาคคั่นหลักพันให้อัตโนมัติเมื่อค่า >= 1000
+// (คะแนน/จำนวนนับทั่วไปมักไม่ถึงหลักพันอยู่แล้วจึงไม่เห็นผลต่างอะไร ส่วนยอดเงิน เช่น เงินพิเศษ/เบี้ยขยัน/ค่าเสียหาย/ยอดขาย จะมีจุลภาคให้อ่านง่ายขึ้นเลย)
+function fmtNum(v) {
+  if (typeof v !== 'number') return v === undefined || v === null || v === '' ? '-' : String(v);
+  var rounded = Math.round(v * 100) / 100;
+  var parts = Math.abs(rounded).toString().split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return (rounded < 0 ? '-' : '') + parts.join('.');
+}
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
 function monthPickerHtml(id, month, year) {
@@ -1185,8 +1193,11 @@ function renderAdminSummary() {
     '<div class="card"><h3>🏆 สรุปคะแนน/เงิน</h3><div class="cardSubtitle">ภาพรวม Performance Score, สิทธิ์เงินพิเศษ และ Reward Points ของทุกคนในเดือนที่เลือก</div>' +
     monthPickerHtml('cs', APP.month, APP.year) +
     '<label>กรองตามกลุ่มเงินพิเศษ</label><select id="csGroupFilter">' + groupFilterOptions + '</select>' +
-    '<button class="btn secondary" id="csExport" style="margin-top:10px;">⬇ ดาวน์โหลดเป็น CSV</button>' +
-    '<div class="calloutBox" style="margin-top:14px;">คอลัมน์ <b>งาน/ผิด/ขาดลามาสาย/รวม</b> คือ Performance Score เต็ม 100 · <b>ดี/รางวัล/Reward Points สะสม</b> แยกต่างหากโดยสิ้นเชิง ไม่รวมกับคะแนนรวม · <b>เงินพิเศษ</b> คำนวณจากคะแนนรวมเท่านั้น · <b>เบี้ยขยัน</b> คนละก้อน ทุกคน Active ได้เท่ากันหมด ไม่เกี่ยวกับคะแนนรวมเลย · <b>ค่าเสียหาย</b> (คอลัมน์ขวาสุด แยกเส้นให้เห็นชัดว่าไม่เกี่ยวกับคะแนน/เงินด้านหน้าทั้งหมด) เป็นตัวเลขแสดงผลเฉยๆ จากที่กรอกไว้ตอนบันทึกเหตุการณ์ความผิด ไม่มีผลต่อคะแนน/เงินใดๆ ทั้งสิ้น</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">' +
+    '<button class="btn secondary" id="csExport">⬇ ดาวน์โหลดเป็น CSV</button>' +
+    '<button class="btn secondary" id="csExportPdf">⬇ ดาวน์โหลดเป็น PDF</button>' +
+    '</div>' +
+    '<div class="calloutBox" style="margin-top:14px;">คอลัมน์ <b>งาน/ผิด/ขาดลามาสาย/รวม</b> คือ Performance Score เต็ม 100 · <b>ดี/รางวัล/คะแนนรวม (สีส้ม)</b> แยกต่างหากโดยสิ้นเชิง ไม่รวมกับคะแนนรวม 100 คะแนนด้านหน้า · <b>เงินพิเศษ</b> คำนวณจากคะแนนรวมเท่านั้น · <b>เบี้ยขยัน</b> คนละก้อน ทุกคน Active ได้เท่ากันหมด ไม่เกี่ยวกับคะแนนรวมเลย · <b>ค่าเสียหาย</b> (คอลัมน์ขวาสุด แยกเส้นให้เห็นชัดว่าไม่เกี่ยวกับคะแนน/เงินด้านหน้าทั้งหมด) เป็นตัวเลขแสดงผลเฉยๆ จากที่กรอกไว้ตอนบันทึกเหตุการณ์ความผิด ไม่มีผลต่อคะแนน/เงินใดๆ ทั้งสิ้น · แถวล่างสุดของตารางคือยอดรวมเงินพิเศษ/เบี้ยขยัน/ค่าเสียหายของทุกคนที่แสดงอยู่</div>' +
     '<div id="csOverrideNote"></div></div>' +
     '<div class="card"><div id="csList" class="muted">กำลังโหลด...</div></div>';
   document.getElementById('content').innerHTML = html;
@@ -1227,12 +1238,20 @@ function renderAdminSummary() {
     if (n > 0) return '<span style="color:var(--red);font-weight:700;">-' + fmtNum(n) + '</span>';
     return fmtNum(0);
   }
+  function sumField(rows, key) {
+    return rows.reduce(function (sum, r) { var n = Number(r[key]); return sum + (isNaN(n) ? 0 : n); }, 0);
+  }
   function render() {
     var rows = filteredSortedRows();
     var el = document.getElementById('csList');
     if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีข้อมูล</div>'; return; }
-    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>กลุ่มเงินพิเศษ</th><th>งาน</th><th>ผิด</th><th>ขาด/ลา/สาย</th><th class="colDivider">รวม</th><th class="colDivider">ดี</th><th>รางวัล</th><th>Reward Points สะสม</th><th class="colDivider">เงินพิเศษ</th><th class="colDivider">เบี้ยขยัน</th><th class="colDivider">ค่าเสียหาย</th></tr>' +
-      rows.map(function (r) { return '<tr><td>' + esc(r['ชื่อพนักงาน']) + '</td><td>' + esc(r['แผนก']) + '</td><td>' + esc(r['กลุ่มเงินพิเศษ']) + '</td><td>' + fmtNum(r['คะแนนงาน']) + '</td><td>' + fmtNum(r['คะแนนความผิด']) + '</td><td>' + fmtNum(r['คะแนนขาดลามาสาย']) + '</td><td class="colDivider totalCell">' + fmtNum(r['คะแนนรวม']) + '</td><td class="colDivider">' + fmtNum(r['คะแนนทำความดี']) + '</td><td>' + fmtNum(r['คะแนนแจ้งรางวัล']) + '</td><td>' + fmtNum(r['Reward Points สะสม']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เงินพิเศษ']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เบี้ยขยัน']) + '</td><td class="colDivider">' + damageCellHtml(r['ค่าความเสียหาย']) + '</td></tr>'; }).join('') + '</table></div>';
+    var totalIncentive = sumField(rows, 'เงินพิเศษ');
+    var totalDiligence = sumField(rows, 'เบี้ยขยัน');
+    var totalDamage = sumField(rows, 'ค่าความเสียหาย');
+    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>กลุ่มเงินพิเศษ</th><th>งาน</th><th>ผิด</th><th>ขาด/ลา/สาย</th><th class="colDivider">รวม</th><th class="colDivider">ดี</th><th>รางวัล</th><th class="amberCell">คะแนนรวม</th><th class="colDivider">เงินพิเศษ</th><th class="colDivider">เบี้ยขยัน</th><th class="colDivider">ค่าเสียหาย</th></tr>' +
+      rows.map(function (r) { return '<tr><td>' + esc(r['ชื่อพนักงาน']) + '</td><td>' + esc(r['แผนก']) + '</td><td>' + esc(r['กลุ่มเงินพิเศษ']) + '</td><td>' + fmtNum(r['คะแนนงาน']) + '</td><td>' + fmtNum(r['คะแนนความผิด']) + '</td><td>' + fmtNum(r['คะแนนขาดลามาสาย']) + '</td><td class="colDivider totalCell">' + fmtNum(r['คะแนนรวม']) + '</td><td class="colDivider">' + fmtNum(r['คะแนนทำความดี']) + '</td><td>' + fmtNum(r['คะแนนแจ้งรางวัล']) + '</td><td class="amberCell">' + fmtNum(r['Reward Points สะสม']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เงินพิเศษ']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เบี้ยขยัน']) + '</td><td class="colDivider">' + damageCellHtml(r['ค่าความเสียหาย']) + '</td></tr>'; }).join('') +
+      '<tr class="totalsRow"><td colspan="10">รวมทั้งหมด (' + rows.length + ' คน)</td><td class="colDivider">' + fmtNum(totalIncentive) + '</td><td class="colDivider">' + fmtNum(totalDiligence) + '</td><td class="colDivider">' + damageCellHtml(totalDamage) + '</td></tr>' +
+      '</table></div>';
   }
   document.getElementById('csExport').addEventListener('click', function () {
     var rows = filteredSortedRows();
@@ -1247,6 +1266,61 @@ function renderAdminSummary() {
     }).join('\n');
     var a = document.createElement('a'); a.href = 'data:text/csv;charset=utf-8,﻿' + encodeURIComponent(csv); a.download = 'monthly_score.csv';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  });
+  // ดาวน์โหลดเป็น PDF — ถ่ายภาพตารางที่เห็นบนหน้าเว็บจริง (html2canvas) แล้วฝังเป็นรูปในไฟล์ PDF (jsPDF) เพื่อให้
+  // ภาษาไทย/สีในตาราง/อิโมจิ 🏆 ในหัวข้อ ออกมาเหมือนที่เห็นบนจอทุกอย่าง (ไม่ใช้การวาดตัวอักษรเองซึ่งฟอนต์ไทย/อิโมจิมักเพี้ยน)
+  document.getElementById('csExportPdf').addEventListener('click', function () {
+    var rows = filteredSortedRows();
+    if (!rows.length) { toast('ไม่มีข้อมูลให้ดาวน์โหลด', true); return; }
+    if (typeof html2canvas === 'undefined' || !window.jspdf) {
+      toast('โหลดไลบรารีสร้าง PDF ไม่สำเร็จ (ต้องต่ออินเทอร์เน็ต) ลองรีเฟรชหน้าแล้วลองใหม่', true);
+      return;
+    }
+    var btn = document.getElementById('csExportPdf');
+    var oldLabel = btn.textContent;
+    btn.textContent = '⏳ กำลังสร้าง PDF...';
+    btn.disabled = true;
+
+    var monthSelect = document.getElementById('cs_m');
+    var monthLabel = (monthSelect.options[monthSelect.selectedIndex] || {}).text || '';
+    var yearVal = document.getElementById('cs_y').value;
+    var groupFilter = document.getElementById('csGroupFilter').value;
+
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;top:0;left:-100000px;width:1500px;background:#ffffff;padding:28px;';
+    wrap.innerHTML =
+      '<div style="font-size:24px;font-weight:800;color:var(--text,#2a2622);margin-bottom:4px;">🏆 สรุปคะแนน/เงิน</div>' +
+      '<div style="font-size:14px;color:#57514a;margin-bottom:18px;">เดือน ' + esc(monthLabel) + ' ' + esc(yearVal) + (groupFilter ? ' · กลุ่มเงินพิเศษ: ' + esc(groupFilter) : ' · ทุกกลุ่มเงินพิเศษ') + '</div>' +
+      document.getElementById('csList').innerHTML;
+    document.body.appendChild(wrap);
+
+    function cleanup() { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); btn.textContent = oldLabel; btn.disabled = false; }
+
+    html2canvas(wrap, { scale: 2, backgroundColor: '#ffffff', windowWidth: 1500 }).then(function (canvas) {
+      cleanup();
+      var imgData = canvas.toDataURL('image/png');
+      var jsPDF = window.jspdf.jsPDF;
+      var pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      var pageWidth = pdf.internal.pageSize.getWidth();
+      var pageHeight = pdf.internal.pageSize.getHeight();
+      var margin = 20;
+      var imgWidth = pageWidth - margin * 2;
+      var imgHeight = canvas.height * imgWidth / canvas.width;
+      var heightLeft = imgHeight;
+      var position = margin;
+      pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
+      heightLeft -= (pageHeight - margin * 2);
+      while (heightLeft > 0) {
+        position = margin - (imgHeight - heightLeft);
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
+        heightLeft -= (pageHeight - margin * 2);
+      }
+      pdf.save('สรุปคะแนนเงิน_' + yearVal + '-' + Number(monthSelect.value) + '.pdf');
+    }).catch(function (e) {
+      cleanup();
+      toast('สร้าง PDF ไม่สำเร็จ: ' + (e.message || String(e)), true);
+    });
   });
 }
 
