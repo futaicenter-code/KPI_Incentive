@@ -11,12 +11,15 @@
    3) ทุกการบันทึกข้อมูลใช้ apiPost() (fetch แบบ POST, Content-Type: text/plain กัน CORS preflight)
       พร้อมแนบ requestId สุ่มใหม่ทุกครั้งที่กดปุ่ม เพื่อกัน Backend สร้างข้อมูลซ้ำถ้ากดซ้ำ/เน็ตหลุดแล้ว retry
    4) ปุ่มบันทึกทุกปุ่มจะถูกปิด (disabled) ระหว่างรอผลจาก Backend กันคนกดซ้ำเร็วๆ (double-tap)
-   5) มี Timeout (20 วินาที) และข้อความแจ้งเตือนภาษาไทยสำหรับ: ออฟไลน์/เน็ตหลุด/หมดเวลา/เซิร์ฟเวอร์ error
+   5) มี Timeout (45 วินาที) และข้อความแจ้งเตือนภาษาไทยสำหรับ: ออฟไลน์/เน็ตหลุด/หมดเวลา/เซิร์ฟเวอร์ error
    ===================================================================== */
 
 /* ===================== ชั้นเชื่อมต่อ API (fetch layer) ===================== */
 
-var API_TIMEOUT_MS = 20000;
+// เดิม 20 วินาที — action "companyMonthlyScores" คำนวณคะแนน+เงินของพนักงาน "ทุกคน" ในบริษัทพร้อมกันทุกครั้ง
+// (ทั้งหน้า Dashboard ที่ดูทีละคน และหน้า "สรุปคะแนน/เงิน") ยิ่งพนักงาน/ข้อมูลสะสมเยอะขึ้นเรื่อยๆ ยิ่งใช้เวลานานขึ้น
+// ปรับเป็น 45 วินาทีกันหลุด Timeout ง่ายเกินไป (แก้ที่ต้นตอความช้าฝั่ง Backend แล้วด้วย ดู Code.gs)
+var API_TIMEOUT_MS = 45000;
 
 function genRequestId() {
   return 'req-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
@@ -504,7 +507,11 @@ function renderAdminDashboard() {
         '<div class="muted" style="margin-top:6px;">' + esc(r['ชื่อพนักงาน']) + ' · ' + esc(r['แผนก']) + (r['กลุ่มเงินพิเศษ'] ? ' · กลุ่มเงินพิเศษ: ' + esc(r['กลุ่มเงินพิเศษ']) : '') + '</div></div>' +
         '<div class="card"><h3>🎖️ เบี้ยขยันเดือนนี้</h3><div class="statValue" style="font-size:22px;">' + fmtNum(r['เบี้ยขยัน']) + '</div>' +
         '<div class="muted" style="margin-top:6px;">คนละก้อนกับเงินพิเศษด้านบน — ทุกคน Active ได้เท่ากันหมด หักตามนาทีมาสาย/ประเภทการลาในเดือนนี้เท่านั้น</div></div>';
-    }).catch(function (e) { area.innerHTML = '<div class="card muted">โหลดไม่สำเร็จ: ' + esc(e.message || e) + '</div>'; });
+    }).catch(function (e) {
+      area.innerHTML = '<div class="card muted">โหลดไม่สำเร็จ: ' + esc(e.message || e) + ' <button class="btn secondary" id="dbRetry" style="margin-left:8px;">ลองใหม่</button></div>';
+      var retryBtn = document.getElementById('dbRetry');
+      if (retryBtn) retryBtn.addEventListener('click', load);
+    });
   }
 }
 
@@ -1199,7 +1206,14 @@ function renderAdminSummary() {
           : '';
       }
       render();
-    }).catch(function (e) { if (document.getElementById('csList')) toast(e.message || String(e), true); });
+    }).catch(function (e) {
+      var el = document.getElementById('csList');
+      if (!el) return; // สลับหน้าไปแล้วระหว่างรอโหลด
+      el.innerHTML = '<div class="muted">โหลดไม่สำเร็จ: ' + esc(e.message || String(e)) + ' <button class="btn secondary" id="csRetry" style="margin-left:8px;">ลองใหม่</button></div>';
+      var retryBtn = document.getElementById('csRetry');
+      if (retryBtn) retryBtn.addEventListener('click', function () { el.innerHTML = '<div class="muted">กำลังโหลด...</div>'; load(); });
+      toast(e.message || String(e), true);
+    });
   }
   function filteredSortedRows() {
     var groupFilter = document.getElementById('csGroupFilter').value;
