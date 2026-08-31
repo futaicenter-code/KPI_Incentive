@@ -114,7 +114,7 @@ function getInitialMode() {
   }
 }
 
-var APP = { mode: getInitialMode(), employees: [], departments: [], errorTypes: [], severityLevels: [], impactOptions: [], workTypesByDept: {}, attendanceStatuses: [], reportRewardDefaults: { self: null, external: null }, goodDeedPoints: null, month: null, year: null, tab: null, adminUnlocked: false };
+var APP = { mode: getInitialMode(), employees: [], departments: [], errorTypes: [], severityLevels: [], impactOptions: [], workTypesByDept: {}, attendanceStatuses: [], leaveTypes: [], reportRewardDefaults: { self: null, external: null }, goodDeedPoints: null, month: null, year: null, tab: null, adminUnlocked: false };
 
 // จำว่า Admin ผ่านรหัสผ่านแล้วในแท็บนี้ (sessionStorage = อยู่แค่แท็บนี้ ปิดแท็บแล้วต้องใส่ใหม่ ไม่ใช่ Login ถาวร)
 function isAdminUnlockedThisTab() {
@@ -197,6 +197,7 @@ function boot() {
       APP.employees = data.employees; APP.departments = data.departments;
       APP.errorTypes = data.errorTypes; APP.severityLevels = data.severityLevels; APP.impactOptions = data.impactOptions || [];
       APP.workTypesByDept = data.workTypesByDept || {}; APP.attendanceStatuses = data.attendanceStatuses || ['ปกติ', 'ขาด', 'ลา', 'มาสาย'];
+      APP.leaveTypes = data.leaveTypes || ['ลาพักร้อน', 'ลาป่วยมีใบรับรองแพทย์', 'ลากิจ', 'ลาป่วยไม่มีใบรับรองแพทย์'];
       APP.reportRewardDefaults = data.reportRewardDefaults || { self: null, external: null };
       APP.goodDeedPoints = data.goodDeedPoints;
       APP.month = data.month; APP.year = data.year;
@@ -498,7 +499,9 @@ function renderAdminDashboard() {
         statCardHtml('', '🌟', 'Reward Points สะสม', r['Reward Points สะสม'], null, 'แยกจาก Performance Score ' + totalW + ' คะแนนโดยสิ้นเชิง ใช้สะสมแลกรางวัลตามเกณฑ์บริษัท ไม่รวมกับคะแนนด้านบน') +
         '</div>' +
         '<div class="card"><h3>💰 เงินพิเศษเดือนนี้</h3><div class="statValue" style="font-size:22px;">' + fmtNum(r['เงินพิเศษ']) + '</div>' +
-        '<div class="muted" style="margin-top:6px;">' + esc(r['ชื่อพนักงาน']) + ' · ' + esc(r['แผนก']) + (r['กลุ่มเงินพิเศษ'] ? ' · กลุ่มเงินพิเศษ: ' + esc(r['กลุ่มเงินพิเศษ']) : '') + '</div></div>';
+        '<div class="muted" style="margin-top:6px;">' + esc(r['ชื่อพนักงาน']) + ' · ' + esc(r['แผนก']) + (r['กลุ่มเงินพิเศษ'] ? ' · กลุ่มเงินพิเศษ: ' + esc(r['กลุ่มเงินพิเศษ']) : '') + '</div></div>' +
+        '<div class="card"><h3>🎖️ เบี้ยขยันเดือนนี้</h3><div class="statValue" style="font-size:22px;">' + fmtNum(r['เบี้ยขยัน']) + '</div>' +
+        '<div class="muted" style="margin-top:6px;">คนละก้อนกับเงินพิเศษด้านบน — ทุกคน Active ได้เท่ากันหมด หักตามนาทีมาสาย/ประเภทการลาในเดือนนี้เท่านั้น</div></div>';
     }).catch(function (e) { area.innerHTML = '<div class="card muted">โหลดไม่สำเร็จ: ' + esc(e.message || e) + '</div>'; });
   }
 }
@@ -842,6 +845,9 @@ function renderAdminAttendance() {
     var lbl = ATTENDANCE_EFFECT_LABELS[s];
     return '<option value="' + s + '">' + esc(s) + (lbl ? ' (' + lbl + ')' : '') + '</option>';
   }).join('');
+  var leaveTypeOptions = '<option value="">ไม่ระบุ (ไม่หักเบี้ยขยัน)</option>' + APP.leaveTypes.map(function (t) {
+    return '<option value="' + esc(t) + '">' + esc(t) + '</option>';
+  }).join('');
   var html =
     '<div class="card"><h3>🗓️ Attendance</h3><div class="cardSubtitle">บันทึกเฉพาะวันที่ผิดปกติ (ขาด/ลา/มาสาย) — วันไหนไม่มีแถวถือว่ามาปกติ ไม่ต้องกรอกทุกวัน</div>' +
     '<div id="atMonthStats" class="statGrid mt0">กำลังโหลด...</div></div>' +
@@ -850,21 +856,38 @@ function renderAdminAttendance() {
     '<div class="row"><div><label>พนักงาน</label><select id="atEmp">' + employeeOptions(APP.employees) + '</select></div>' +
     '<div><label>วันที่</label><input type="date" id="atDate" value="' + todayStr() + '"></div></div>' +
     '<label>สถานะ</label><select id="atStatus">' + statusOptions + '</select>' +
+    '<div id="atLateMinutesWrap" style="display:none;"><label>นาทีที่มาสาย</label><input type="number" id="atLateMinutes" min="0" max="600" step="1" placeholder="ไม่บังคับ — ใช้คำนวณเบี้ยขยันเท่านั้น"></div>' +
+    '<div id="atLeaveTypeWrap" style="display:none;"><label>ประเภทการลา (ใช้คำนวณเบี้ยขยัน)</label><select id="atLeaveType">' + leaveTypeOptions + '</select></div>' +
     '<label>หมายเหตุ</label><input type="text" id="atNote" placeholder="ไม่บังคับ">' +
     '<button class="btn" id="atSave">✓ บันทึก</button></div>' +
 
     '<div class="card"><h3>🗂️ ประวัติเดือนนี้</h3>' + monthPickerHtml('at', APP.month, APP.year) + '<div id="atList" class="muted timeline">กำลังโหลด...</div></div>';
   document.getElementById('content').innerHTML = html;
 
+  function syncConditionalFields() {
+    var status = document.getElementById('atStatus').value;
+    document.getElementById('atLateMinutesWrap').style.display = (status === 'มาสาย') ? '' : 'none';
+    document.getElementById('atLeaveTypeWrap').style.display = (status === 'ลาอนุมัติ' || status === 'ลาไม่อนุมัติ') ? '' : 'none';
+  }
+  document.getElementById('atStatus').addEventListener('change', syncConditionalFields);
+  syncConditionalFields();
+
   document.getElementById('atSave').addEventListener('click', function (evt) {
+    var status = document.getElementById('atStatus').value;
     var payload = {
       employeeId: document.getElementById('atEmp').value,
       date: document.getElementById('atDate').value,
-      status: document.getElementById('atStatus').value,
-      note: document.getElementById('atNote').value
+      status: status,
+      note: document.getElementById('atNote').value,
+      lateMinutes: (status === 'มาสาย') ? document.getElementById('atLateMinutes').value : '',
+      leaveType: (status === 'ลาอนุมัติ' || status === 'ลาไม่อนุมัติ') ? document.getElementById('atLeaveType').value : ''
     };
     withButtonGuard(evt.target, function () { return apiPost('addAttendanceLog', payload); })
-      .then(function () { toast('บันทึกแล้ว'); document.getElementById('atNote').value = ''; loadList(); })
+      .then(function () {
+        toast('บันทึกแล้ว'); document.getElementById('atNote').value = '';
+        document.getElementById('atLateMinutes').value = ''; document.getElementById('atLeaveType').value = '';
+        loadList();
+      })
       .catch(function (e) { toast(e.message || String(e), true); });
   });
 
@@ -888,7 +911,13 @@ function renderAdminAttendance() {
       if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีบันทึกผิดปกติในเดือนนี้ (ถือว่าทุกคนมาปกติ)</div>'; return; }
       el.innerHTML = rows.map(function (r) {
         var lbl = ATTENDANCE_EFFECT_LABELS[r['สถานะ']];
-        return '<div class="list-item"><b>' + esc(r['ชื่อพนักงาน']) + '</b> — ' + esc(r['สถานะ']) + (lbl ? ' <span class="muted">(' + lbl + ')</span>' : '') + '<div class="meta">' + fmtDate(r['วันที่']) + (r['หมายเหตุ'] ? ' · ' + esc(r['หมายเหตุ']) : '') + '</div></div>';
+        var extra = '';
+        if (r['สถานะ'] === 'มาสาย' && r['นาทีที่มาสาย'] !== '' && r['นาทีที่มาสาย'] !== undefined && r['นาทีที่มาสาย'] !== null) {
+          extra = ' · สาย ' + esc(r['นาทีที่มาสาย']) + ' นาที';
+        } else if ((r['สถานะ'] === 'ลาอนุมัติ' || r['สถานะ'] === 'ลาไม่อนุมัติ') && r['ประเภทการลา']) {
+          extra = ' · ' + esc(r['ประเภทการลา']);
+        }
+        return '<div class="list-item"><b>' + esc(r['ชื่อพนักงาน']) + '</b> — ' + esc(r['สถานะ']) + (lbl ? ' <span class="muted">(' + lbl + ')</span>' : '') + extra + '<div class="meta">' + fmtDate(r['วันที่']) + (r['หมายเหตุ'] ? ' · ' + esc(r['หมายเหตุ']) : '') + '</div></div>';
       }).join('');
     }).catch(function (e) { toast(e.message || String(e), true); });
   }
@@ -1135,7 +1164,7 @@ function renderAdminSummary() {
     monthPickerHtml('cs', APP.month, APP.year) +
     '<label>กรองตามกลุ่มเงินพิเศษ</label><select id="csGroupFilter">' + groupFilterOptions + '</select>' +
     '<button class="btn secondary" id="csExport" style="margin-top:10px;">⬇ ดาวน์โหลดเป็น CSV</button>' +
-    '<div class="calloutBox" style="margin-top:14px;">คอลัมน์ <b>งาน/ผิด/ขาดลามาสาย/รวม</b> คือ Performance Score เต็ม 100 · <b>ดี/รางวัล/Reward Points สะสม</b> แยกต่างหากโดยสิ้นเชิง ไม่รวมกับคะแนนรวม · <b>เงินพิเศษ</b> คำนวณจากคะแนนรวมเท่านั้น</div>' +
+    '<div class="calloutBox" style="margin-top:14px;">คอลัมน์ <b>งาน/ผิด/ขาดลามาสาย/รวม</b> คือ Performance Score เต็ม 100 · <b>ดี/รางวัล/Reward Points สะสม</b> แยกต่างหากโดยสิ้นเชิง ไม่รวมกับคะแนนรวม · <b>เงินพิเศษ</b> คำนวณจากคะแนนรวมเท่านั้น · <b>เบี้ยขยัน</b> คนละก้อน ทุกคน Active ได้เท่ากันหมด ไม่เกี่ยวกับคะแนนรวมเลย</div>' +
     '<div id="csOverrideNote"></div></div>' +
     '<div class="card"><div id="csList" class="muted">กำลังโหลด...</div></div>';
   document.getElementById('content').innerHTML = html;
@@ -1166,13 +1195,13 @@ function renderAdminSummary() {
     var rows = filteredSortedRows();
     var el = document.getElementById('csList');
     if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีข้อมูล</div>'; return; }
-    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>กลุ่มเงินพิเศษ</th><th>งาน</th><th>ผิด</th><th>ขาด/ลา/สาย</th><th class="colDivider">รวม</th><th class="colDivider">ดี</th><th>รางวัล</th><th>Reward Points สะสม</th><th class="colDivider">เงินพิเศษ</th></tr>' +
-      rows.map(function (r) { return '<tr><td>' + esc(r['ชื่อพนักงาน']) + '</td><td>' + esc(r['แผนก']) + '</td><td>' + esc(r['กลุ่มเงินพิเศษ']) + '</td><td>' + fmtNum(r['คะแนนงาน']) + '</td><td>' + fmtNum(r['คะแนนความผิด']) + '</td><td>' + fmtNum(r['คะแนนขาดลามาสาย']) + '</td><td class="colDivider totalCell">' + fmtNum(r['คะแนนรวม']) + '</td><td class="colDivider">' + fmtNum(r['คะแนนทำความดี']) + '</td><td>' + fmtNum(r['คะแนนแจ้งรางวัล']) + '</td><td>' + fmtNum(r['Reward Points สะสม']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เงินพิเศษ']) + '</td></tr>'; }).join('') + '</table></div>';
+    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>กลุ่มเงินพิเศษ</th><th>งาน</th><th>ผิด</th><th>ขาด/ลา/สาย</th><th class="colDivider">รวม</th><th class="colDivider">ดี</th><th>รางวัล</th><th>Reward Points สะสม</th><th class="colDivider">เงินพิเศษ</th><th class="colDivider">เบี้ยขยัน</th></tr>' +
+      rows.map(function (r) { return '<tr><td>' + esc(r['ชื่อพนักงาน']) + '</td><td>' + esc(r['แผนก']) + '</td><td>' + esc(r['กลุ่มเงินพิเศษ']) + '</td><td>' + fmtNum(r['คะแนนงาน']) + '</td><td>' + fmtNum(r['คะแนนความผิด']) + '</td><td>' + fmtNum(r['คะแนนขาดลามาสาย']) + '</td><td class="colDivider totalCell">' + fmtNum(r['คะแนนรวม']) + '</td><td class="colDivider">' + fmtNum(r['คะแนนทำความดี']) + '</td><td>' + fmtNum(r['คะแนนแจ้งรางวัล']) + '</td><td>' + fmtNum(r['Reward Points สะสม']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เงินพิเศษ']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เบี้ยขยัน']) + '</td></tr>'; }).join('') + '</table></div>';
   }
   document.getElementById('csExport').addEventListener('click', function () {
     var rows = filteredSortedRows();
     if (!rows.length) { toast('ไม่มีข้อมูลให้ดาวน์โหลด', true); return; }
-    var cols = ['รหัสพนักงาน', 'ชื่อพนักงาน', 'แผนก', 'กลุ่มเงินพิเศษ', 'คะแนนงาน', 'คะแนนความผิด', 'คะแนนขาดลามาสาย', 'คะแนนรวม', 'คะแนนทำความดี', 'คะแนนแจ้งรางวัล', 'Reward Points สะสม', 'เงินพิเศษ'];
+    var cols = ['รหัสพนักงาน', 'ชื่อพนักงาน', 'แผนก', 'กลุ่มเงินพิเศษ', 'คะแนนงาน', 'คะแนนความผิด', 'คะแนนขาดลามาสาย', 'คะแนนรวม', 'คะแนนทำความดี', 'คะแนนแจ้งรางวัล', 'Reward Points สะสม', 'เงินพิเศษ', 'เบี้ยขยัน'];
     var csv = cols.join(',') + '\n' + rows.map(function (r) { return cols.map(function (c) { return '"' + String(r[c] === undefined ? '' : r[c]).replace(/"/g, '""') + '"'; }).join(','); }).join('\n');
     var a = document.createElement('a'); a.href = 'data:text/csv;charset=utf-8,﻿' + encodeURIComponent(csv); a.download = 'monthly_score.csv';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -1187,7 +1216,8 @@ function renderAdminSummary() {
 function renderAdminEmployees() {
   var html =
     '<div class="card"><h3>👤 จัดการพนักงาน</h3><div class="cardSubtitle">แก้ไข "กลุ่มเงินพิเศษ" และ "สิทธิ์เงินพิเศษ" ของพนักงานที่มีอยู่แล้ว — เพิ่มพนักงานใหม่ครั้งแรกยังต้องเพิ่มในชีต Employees เอง</div>' +
-    '<div class="calloutBox mt0">ติ๊ก "มีสิทธิ์รับเงินพิเศษ" เมื่อพนักงานผ่านโปรแล้วพร้อมรับเงินก้อนนี้ — ก่อนหน้านั้นบันทึก Error/Attendance/Work Score ได้ตามปกติทุกคนเหมือนกันหมด ไม่กระทบสูตรคำนวณคะแนนใดๆ เลย แค่ยังไม่ได้รับเงินก้อนจนกว่าจะติ๊กเปิดให้</div>' +
+    '<div class="calloutBox mt0">ติ๊ก "มีสิทธิ์รับเงินพิเศษ" เมื่อพนักงานผ่านโปรแล้วพร้อมรับเงินก้อนนี้ — ก่อนหน้านั้นบันทึก Error/Attendance/Work Score ได้ตามปกติทุกคนเหมือนกันหมด ไม่กระทบสูตรคำนวณคะแนนใดๆ เลย แค่ยังไม่ได้รับเงินก้อนจนกว่าจะติ๊กเปิดให้<br><br>' +
+    '"เริ่มมีสิทธิ์ตั้งแต่เดือน/ปี" (ไม่บังคับ) — ถ้ากำหนดไว้ รายงานของเดือนก่อนหน้านั้นจะไม่นับรวมเงินก้อนนี้ให้คนนี้ย้อนหลัง แม้จะเพิ่งมาติ๊ก "มีสิทธิ์" ทีหลังก็ตาม เช่น ติ๊กมีสิทธิ์และตั้งเริ่ม 10/2026 → เดือน 8 จะยังไม่เข้าร่วม แต่เดือน 10 เป็นต้นไปจะเข้าร่วม ถ้าปล่อยว่างไว้ = ไม่จำกัดเดือน (เข้าร่วมได้ทุกเดือนที่ติ๊กมีสิทธิ์)</div>' +
     '<div id="empMgmtList" class="muted" style="margin-top:14px;">กำลังโหลด...</div></div>';
   document.getElementById('content').innerHTML = html;
   load();
@@ -1210,10 +1240,17 @@ function renderAdminEmployees() {
     return opts;
   }
 
+  var MONTH_ABBR = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+  function fromMonthOptionsHtml(selected) {
+    var opts = '<option value=""' + (selected ? '' : ' selected') + '>ไม่กำหนด</option>';
+    for (var m = 1; m <= 12; m++) opts += '<option value="' + m + '"' + (m === selected ? ' selected' : '') + '>' + MONTH_ABBR[m] + '</option>';
+    return opts;
+  }
+
   function render(rows) {
     var el = document.getElementById('empMgmtList');
     if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีข้อมูลพนักงาน</div>'; return; }
-    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>สถานะ</th><th>กลุ่มเงินพิเศษ</th><th>มีสิทธิ์รับเงินพิเศษ</th><th></th></tr>' +
+    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>สถานะ</th><th>กลุ่มเงินพิเศษ</th><th>มีสิทธิ์รับเงินพิเศษ</th><th>เริ่มมีสิทธิ์ตั้งแต่</th><th></th></tr>' +
       rows.map(function (r) {
         return '<tr data-emp-id="' + esc(r.id) + '">' +
           '<td>' + esc(r.nickname) + ' (' + esc(r.fullName) + ')</td>' +
@@ -1221,6 +1258,10 @@ function renderAdminEmployees() {
           '<td>' + (r.status === 'Active' ? '<span class="badge approved">Active</span>' : '<span class="badge rejected">Inactive</span>') + '</td>' +
           '<td><select class="empGroupSel">' + groupOptionsHtml(r.incentiveGroup) + '</select></td>' +
           '<td style="text-align:center;"><input type="checkbox" class="empEligibleChk"' + (r.eligible ? ' checked' : '') + '></td>' +
+          '<td><div style="display:flex;gap:4px;align-items:center;">' +
+            '<select class="empFromMonthSel">' + fromMonthOptionsHtml(r.eligibleFromMonth) + '</select>' +
+            '<input type="number" class="empFromYearInput" placeholder="ปี" min="2000" max="2100" step="1" style="width:70px;" value="' + (r.eligibleFromYear ? r.eligibleFromYear : '') + '">' +
+          '</div></td>' +
           '<td><button class="btn secondary small empSaveBtn" type="button">บันทึก</button></td>' +
           '</tr>';
       }).join('') + '</table></div>';
@@ -1231,7 +1272,19 @@ function renderAdminEmployees() {
         var employeeId = tr.getAttribute('data-emp-id');
         var incentiveGroup = tr.querySelector('.empGroupSel').value;
         var eligible = tr.querySelector('.empEligibleChk').checked;
-        apiPost('setEmployeeIncentiveSettings', { employeeId: employeeId, incentiveGroup: incentiveGroup, eligible: eligible }).then(function () {
+        var fromMonth = tr.querySelector('.empFromMonthSel').value;
+        var fromYear = tr.querySelector('.empFromYearInput').value.trim();
+        if ((fromMonth !== '' && fromYear === '') || (fromMonth === '' && fromYear !== '')) {
+          toast('ต้องกรอกทั้งเดือนและปีที่เริ่มมีสิทธิ์คู่กัน หรือเว้นว่างทั้งคู่', true);
+          return;
+        }
+        apiPost('setEmployeeIncentiveSettings', {
+          employeeId: employeeId,
+          incentiveGroup: incentiveGroup,
+          eligible: eligible,
+          eligibleFromMonth: fromMonth,
+          eligibleFromYear: fromYear
+        }).then(function () {
           toast('บันทึกแล้ว — ไปดูผลได้ที่ "สรุปคะแนน/เงิน" หรือ Dashboard ของคนนี้');
         }).catch(function (e) { toast(e.message || String(e), true); });
       });
