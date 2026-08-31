@@ -1186,7 +1186,7 @@ function renderAdminSummary() {
     monthPickerHtml('cs', APP.month, APP.year) +
     '<label>กรองตามกลุ่มเงินพิเศษ</label><select id="csGroupFilter">' + groupFilterOptions + '</select>' +
     '<button class="btn secondary" id="csExport" style="margin-top:10px;">⬇ ดาวน์โหลดเป็น CSV</button>' +
-    '<div class="calloutBox" style="margin-top:14px;">คอลัมน์ <b>งาน/ผิด/ขาดลามาสาย/รวม</b> คือ Performance Score เต็ม 100 · <b>ดี/รางวัล/Reward Points สะสม</b> แยกต่างหากโดยสิ้นเชิง ไม่รวมกับคะแนนรวม · <b>เงินพิเศษ</b> คำนวณจากคะแนนรวมเท่านั้น · <b>เบี้ยขยัน</b> คนละก้อน ทุกคน Active ได้เท่ากันหมด ไม่เกี่ยวกับคะแนนรวมเลย</div>' +
+    '<div class="calloutBox" style="margin-top:14px;">คอลัมน์ <b>งาน/ผิด/ขาดลามาสาย/รวม</b> คือ Performance Score เต็ม 100 · <b>ค่าเสียหาย</b> เป็นตัวเลขแสดงผลเฉยๆ (จากที่กรอกไว้ตอนบันทึกเหตุการณ์ความผิด) ไม่มีผลต่อคะแนน/เงินใดๆ ทั้งสิ้น · <b>ดี/รางวัล/Reward Points สะสม</b> แยกต่างหากโดยสิ้นเชิง ไม่รวมกับคะแนนรวม · <b>เงินพิเศษ</b> คำนวณจากคะแนนรวมเท่านั้น · <b>เบี้ยขยัน</b> คนละก้อน ทุกคน Active ได้เท่ากันหมด ไม่เกี่ยวกับคะแนนรวมเลย</div>' +
     '<div id="csOverrideNote"></div></div>' +
     '<div class="card"><div id="csList" class="muted">กำลังโหลด...</div></div>';
   document.getElementById('content').innerHTML = html;
@@ -1220,18 +1220,31 @@ function renderAdminSummary() {
     return lastRows.filter(function (r) { return !groupFilter || r['กลุ่มเงินพิเศษ'] === groupFilter; })
       .slice().sort(function (a, b) { return (Number(b['คะแนนรวม']) || 0) - (Number(a['คะแนนรวม']) || 0); }); // เรียงคะแนนรวมมาก→น้อยเป็นค่าเริ่มต้น
   }
+  // ค่าเสียหายจริงเป็นตัวเลขบวกที่เก็บไว้ (เช่น 500 = เสียหาย 500 บาท) แต่โชว์ในตารางเป็นค่าลบสีแดงให้เห็นชัดว่าเป็นเงินที่เสียไป
+  // (0 = ไม่มีความเสียหายเดือนนี้ โชว์ปกติไม่ใช่สีแดง)
+  function damageCellHtml(v) {
+    var n = Number(v) || 0;
+    if (n > 0) return '<span style="color:var(--red);font-weight:700;">-' + fmtNum(n) + '</span>';
+    return fmtNum(0);
+  }
   function render() {
     var rows = filteredSortedRows();
     var el = document.getElementById('csList');
     if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีข้อมูล</div>'; return; }
-    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>กลุ่มเงินพิเศษ</th><th>งาน</th><th>ผิด</th><th>ขาด/ลา/สาย</th><th class="colDivider">รวม</th><th class="colDivider">ดี</th><th>รางวัล</th><th>Reward Points สะสม</th><th class="colDivider">เงินพิเศษ</th><th class="colDivider">เบี้ยขยัน</th></tr>' +
-      rows.map(function (r) { return '<tr><td>' + esc(r['ชื่อพนักงาน']) + '</td><td>' + esc(r['แผนก']) + '</td><td>' + esc(r['กลุ่มเงินพิเศษ']) + '</td><td>' + fmtNum(r['คะแนนงาน']) + '</td><td>' + fmtNum(r['คะแนนความผิด']) + '</td><td>' + fmtNum(r['คะแนนขาดลามาสาย']) + '</td><td class="colDivider totalCell">' + fmtNum(r['คะแนนรวม']) + '</td><td class="colDivider">' + fmtNum(r['คะแนนทำความดี']) + '</td><td>' + fmtNum(r['คะแนนแจ้งรางวัล']) + '</td><td>' + fmtNum(r['Reward Points สะสม']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เงินพิเศษ']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เบี้ยขยัน']) + '</td></tr>'; }).join('') + '</table></div>';
+    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>กลุ่มเงินพิเศษ</th><th>งาน</th><th>ผิด</th><th>ค่าเสียหาย</th><th>ขาด/ลา/สาย</th><th class="colDivider">รวม</th><th class="colDivider">ดี</th><th>รางวัล</th><th>Reward Points สะสม</th><th class="colDivider">เงินพิเศษ</th><th class="colDivider">เบี้ยขยัน</th></tr>' +
+      rows.map(function (r) { return '<tr><td>' + esc(r['ชื่อพนักงาน']) + '</td><td>' + esc(r['แผนก']) + '</td><td>' + esc(r['กลุ่มเงินพิเศษ']) + '</td><td>' + fmtNum(r['คะแนนงาน']) + '</td><td>' + fmtNum(r['คะแนนความผิด']) + '</td><td>' + damageCellHtml(r['ค่าความเสียหาย']) + '</td><td>' + fmtNum(r['คะแนนขาดลามาสาย']) + '</td><td class="colDivider totalCell">' + fmtNum(r['คะแนนรวม']) + '</td><td class="colDivider">' + fmtNum(r['คะแนนทำความดี']) + '</td><td>' + fmtNum(r['คะแนนแจ้งรางวัล']) + '</td><td>' + fmtNum(r['Reward Points สะสม']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เงินพิเศษ']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เบี้ยขยัน']) + '</td></tr>'; }).join('') + '</table></div>';
   }
   document.getElementById('csExport').addEventListener('click', function () {
     var rows = filteredSortedRows();
     if (!rows.length) { toast('ไม่มีข้อมูลให้ดาวน์โหลด', true); return; }
-    var cols = ['รหัสพนักงาน', 'ชื่อพนักงาน', 'แผนก', 'กลุ่มเงินพิเศษ', 'คะแนนงาน', 'คะแนนความผิด', 'คะแนนขาดลามาสาย', 'คะแนนรวม', 'คะแนนทำความดี', 'คะแนนแจ้งรางวัล', 'Reward Points สะสม', 'เงินพิเศษ', 'เบี้ยขยัน'];
-    var csv = cols.join(',') + '\n' + rows.map(function (r) { return cols.map(function (c) { return '"' + String(r[c] === undefined ? '' : r[c]).replace(/"/g, '""') + '"'; }).join(','); }).join('\n');
+    var cols = ['รหัสพนักงาน', 'ชื่อพนักงาน', 'แผนก', 'กลุ่มเงินพิเศษ', 'คะแนนงาน', 'คะแนนความผิด', 'ค่าความเสียหาย', 'คะแนนขาดลามาสาย', 'คะแนนรวม', 'คะแนนทำความดี', 'คะแนนแจ้งรางวัล', 'Reward Points สะสม', 'เงินพิเศษ', 'เบี้ยขยัน'];
+    var csv = cols.join(',') + '\n' + rows.map(function (r) {
+      return cols.map(function (c) {
+        var v = r[c];
+        if (c === 'ค่าความเสียหาย' && Number(v) > 0) v = -Number(v); // เหมือนหน้าเว็บ: โชว์เป็นค่าลบในไฟล์ที่ดาวน์โหลดด้วย
+        return '"' + String(v === undefined ? '' : v).replace(/"/g, '""') + '"';
+      }).join(',');
+    }).join('\n');
     var a = document.createElement('a'); a.href = 'data:text/csv;charset=utf-8,﻿' + encodeURIComponent(csv); a.download = 'monthly_score.csv';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   });
