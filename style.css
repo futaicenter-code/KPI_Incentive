@@ -217,6 +217,8 @@ table.simple tr:hover td { background: var(--bg-alt); }
 table.simple .colDivider { border-left: 2px solid var(--border); }
 table.simple .totalCell { color: var(--coral-dark); font-weight: 800; }
 table.simple .moneyCell { color: var(--green); font-weight: 800; }
+table.simple .amberCell { color: var(--amber); font-weight: 800; }
+table.simple .totalsRow td { font-weight: 800; background: var(--bg-alt); border-top: 2px solid var(--border-strong); }
 
 /* ===================== MONTH PICKER ===================== */
 .month-picker { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
