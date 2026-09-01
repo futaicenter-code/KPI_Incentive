@@ -1300,22 +1300,22 @@ function renderAdminSummary() {
       cleanup();
       var imgData = canvas.toDataURL('image/png');
       var jsPDF = window.jspdf.jsPDF;
-      var pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      // แนวตั้ง + ย่อภาพทั้งตารางให้พอดี "หน้าเดียว" เสมอ (ตามที่พี่ขอ) — คำนวณอัตราย่อจากทั้งความกว้างและความสูง
+      // พร้อมกัน (เลือกตัวที่ย่อมากกว่า) แล้ววางกึ่งกลางหน้า จะไม่มีการตัดขึ้นหน้า 2 อีกต่อไป ถ้าพนักงานเยอะ/คอลัมน์เยอะ
+      // ตัวหนังสือในภาพจะเล็กลงตามไปด้วย (ซูมดูในตัวเปิด PDF ได้) — ถ้าอยากได้ตัวใหญ่ขึ้น กรองกลุ่มเงินพิเศษก่อนกดดาวน์โหลด
+      // จะได้แถวน้อยลง ย่อน้อยลง ตัวหนังสือใหญ่ขึ้น
+      var pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
       var pageWidth = pdf.internal.pageSize.getWidth();
       var pageHeight = pdf.internal.pageSize.getHeight();
       var margin = 20;
-      var imgWidth = pageWidth - margin * 2;
-      var imgHeight = canvas.height * imgWidth / canvas.width;
-      var heightLeft = imgHeight;
-      var position = margin;
-      pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
-      heightLeft -= (pageHeight - margin * 2);
-      while (heightLeft > 0) {
-        position = margin - (imgHeight - heightLeft);
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
-        heightLeft -= (pageHeight - margin * 2);
-      }
+      var availW = pageWidth - margin * 2;
+      var availH = pageHeight - margin * 2;
+      var scale = Math.min(availW / canvas.width, availH / canvas.height);
+      var imgWidth = canvas.width * scale;
+      var imgHeight = canvas.height * scale;
+      var x = margin + (availW - imgWidth) / 2; // จัดกึ่งกลางแนวนอน
+      var y = margin;
+      pdf.addImage(imgData, 'PNG', x, y, imgWidth, imgHeight);
       pdf.save('สรุปคะแนนเงิน_' + yearVal + '-' + Number(monthSelect.value) + '.pdf');
     }).catch(function (e) {
       cleanup();
