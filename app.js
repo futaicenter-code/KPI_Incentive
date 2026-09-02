@@ -895,6 +895,7 @@ function renderAdminAttendance() {
     '<div class="card"><h3>📋 บันทึกรายการใหม่</h3>' +
     '<div class="row"><div><label>พนักงาน</label><select id="atEmp">' + employeeOptions(APP.employees) + '</select></div>' +
     '<div><label>วันที่</label><input type="date" id="atDate" value="' + todayStr() + '"></div></div>' +
+    '<label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="checkbox" id="atShowInactive" style="width:auto;"> แสดงพนักงานที่ลาออกแล้วด้วย (สำหรับลงย้อนหลัง เช่น ลืมบันทึกก่อนติ๊ก Inactive)</label>' +
     '<label>สถานะ</label><select id="atStatus">' + statusOptions + '</select>' +
     '<div id="atLateMinutesWrap" style="display:none;"><label>นาทีที่มาสาย</label><input type="number" id="atLateMinutes" min="0" max="600" step="1" placeholder="ไม่บังคับ — ใช้คำนวณเบี้ยขยันเท่านั้น"></div>' +
     '<div id="atLeaveTypeWrap" style="display:none;"><label>ประเภทการลา (ใช้คำนวณเบี้ยขยัน)</label><select id="atLeaveType">' + leaveTypeOptions + '</select></div>' +
@@ -911,6 +912,39 @@ function renderAdminAttendance() {
   }
   document.getElementById('atStatus').addEventListener('change', syncConditionalFields);
   syncConditionalFields();
+
+  // ปุ่ม "แสดงพนักงานที่ลาออกแล้วด้วย" — ค่าเริ่มต้นปิดไว้เสมอ (ดรอปดาวน์ยังเป็นเฉพาะคน Active เหมือนเดิม ใช้งานประจำวันไม่ยุ่งยาก)
+  // พอติ๊กเปิดถึงจะดึงรายชื่อทุกคน (รวม Inactive) มาจาก action "employeesForManagement" (เดียวกับหน้า "จัดการพนักงาน")
+  // มาแทนที่ตัวเลือกทั้งหมด — ใช้สำหรับลงบันทึกย้อนหลังกรณีลืมบันทึกก่อนจะติ๊ก Inactive ให้พนักงานที่ลาออกไปแล้ว (บันทึกได้
+  // ปกติทุกประการ เพราะ addAttendanceLog ฝั่ง Backend ไม่ได้เช็คสถานะ Active เลยอยู่แล้ว) ดึงมาครั้งเดียวแล้วแคชไว้ ไม่ต้อง
+  // ยิงซ้ำทุกครั้งที่ติ๊ก/ถอดติ๊กสลับไปมา
+  var allEmployeesCache = null;
+  document.getElementById('atShowInactive').addEventListener('change', function (evt) {
+    var atEmp = document.getElementById('atEmp');
+    var prevSelected = atEmp.value;
+    if (!evt.target.checked) {
+      atEmp.innerHTML = employeeOptions(APP.employees);
+      if (APP.employees.some(function (e) { return e.id === prevSelected; })) atEmp.value = prevSelected;
+      return;
+    }
+    if (allEmployeesCache) {
+      atEmp.innerHTML = employeeOptions(allEmployeesCache);
+      atEmp.value = prevSelected;
+      return;
+    }
+    atEmp.innerHTML = '<option>กำลังโหลด...</option>';
+    apiGet('employeesForManagement', {}).then(function (rows) {
+      allEmployeesCache = rows.map(function (r) {
+        return { id: r.id, name: r.nickname + ' (' + r.fullName + ')' + (r.status !== 'Active' ? ' — ลาออกแล้ว' : '') };
+      });
+      atEmp.innerHTML = employeeOptions(allEmployeesCache);
+      atEmp.value = prevSelected;
+    }).catch(function (e) {
+      toast(e.message || String(e), true);
+      evt.target.checked = false;
+      atEmp.innerHTML = employeeOptions(APP.employees);
+    });
+  });
 
   document.getElementById('atSave').addEventListener('click', function (evt) {
     var status = document.getElementById('atStatus').value;
