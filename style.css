@@ -219,6 +219,24 @@ table.simple .totalCell { color: var(--coral-dark); font-weight: 800; }
 table.simple .moneyCell { color: var(--green); font-weight: 800; }
 table.simple .amberCell { color: var(--amber); font-weight: 800; }
 table.simple .totalsRow td { font-weight: 800; background: var(--bg-alt); border-top: 2px solid var(--border-strong); }
+table.simple th .thNote { display: block; font-size: 9.5px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); margin-top: 2px; }
+/* พนักงานลาออกแล้ว (Inactive) ที่ยังโผล่ในรายงานของเดือนที่เขายังทำงานอยู่จริง — จางลงเล็กน้อย + ป้ายกำกับให้เห็นชัด */
+table.simple tr.inactiveRow td { color: var(--muted); background: var(--bg-alt); }
+table.simple tr.inactiveRow td.moneyCell, table.simple tr.inactiveRow td.amberCell, table.simple tr.inactiveRow td.totalCell { color: var(--muted); }
+.inactiveBadge { display: inline-block; font-size: 10px; font-weight: 700; color: #7a4a06; background: var(--amber-light); border-radius: 6px; padding: 1px 6px; margin-left: 6px; vertical-align: middle; }
+
+/* ===================== ปฏิทินบริษัท (COMPANY CALENDAR) ===================== */
+.calDow { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 6px; }
+.calDow div { text-align: center; font-size: 11.5px; color: var(--muted); font-weight: 700; }
+.calDays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.calCell { min-height: 92px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px; background: var(--card); overflow: hidden; }
+.calCellEmpty { background: transparent; border-color: transparent; }
+.calCellToday { border-color: var(--coral); box-shadow: 0 0 0 1.5px var(--coral) inset; }
+.calDateNum { font-size: 12px; font-weight: 800; color: var(--text); margin-bottom: 4px; }
+.calEvent { font-size: 10.5px; padding: 2px 5px; border-radius: 6px; margin-bottom: 3px; line-height: 1.35; overflow-wrap: break-word; }
+.calEventAbsent { background: var(--red-light); color: #9c2b2f; }
+.calEventLate { background: var(--blue-light); color: var(--blue-dark); }
+.calEventLeave { background: var(--amber-light); color: #7a4a06; }
 
 /* ===================== MONTH PICKER ===================== */
 .month-picker { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
