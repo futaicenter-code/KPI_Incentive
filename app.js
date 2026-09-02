@@ -150,6 +150,15 @@ function fmtNum(v) {
   return (rounded < 0 ? '-' : '') + parts.join('.');
 }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
+// เดือน/ปีบวกลบ delta เดือน แล้วข้ามปีให้ถูกต้องอัตโนมัติ (delta ติดลบได้ = ถอยหลัง) — ใช้ร่วมกันทั้งหน้า
+// "สรุปคะแนน/เงิน" (คำนวณเดือนที่เงินออกจริง) และหน้า "ปฏิทินบริษัท" (ปุ่มก่อนหน้า/ถัดไป)
+function addMonths(month, year, delta) {
+  var total = (Number(year) * 12 + (Number(month) - 1)) + delta;
+  return { month: (total % 12) + 1, year: Math.floor(total / 12) };
+}
+function sumField(rows, key) {
+  return rows.reduce(function (sum, r) { var n = Number(r[key]); return sum + (isNaN(n) ? 0 : n); }, 0);
+}
 
 function monthPickerHtml(id, month, year) {
   var months = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
@@ -441,6 +450,7 @@ var ADMIN_TABS = [
   { key: 'error', label: 'Error', icon: '⚠️', render: renderAdminError },
   { key: 'gooddeed', label: 'Good Deed', icon: '🌟', render: renderAdminGoodDeed },
   { key: 'attendance', label: 'Attendance', icon: '🗓️', render: renderAdminAttendance },
+  { key: 'calendar', label: 'ปฏิทินบริษัท', icon: '📅', render: renderAdminCalendar },
   { key: 'summary', label: 'สรุปคะแนน/เงิน', icon: '💰', render: renderAdminSummary },
   { key: 'employees', label: 'จัดการพนักงาน', icon: '👤', render: renderAdminEmployees }
 ];
@@ -953,6 +963,122 @@ function renderAdminAttendance() {
   }
 }
 
+/* ---- 7.5 ปฏิทินบริษัท — ดึงข้อมูลเดียวกับ Attendance (action attendanceLogForMonth เดิม) มาแสดงเป็นปฏิทินรายวัน
+   1 บรรทัดต่อ 1 คนต่อ 1 เหตุการณ์ต่อวัน (ขาด/ลา/สาย) + ตารางสรุปเบี้ยขยันของทุกคนต่อท้าย — เบี้ยขยันย้ายมาอยู่หน้านี้แทน
+   หน้า "สรุปคะแนน/เงิน" แล้วตามที่พี่ขอ (ไม่ได้แก้สูตรคำนวณเบี้ยขยันใดๆ เลย แค่ย้ายที่แสดงผล) ---- */
+function renderAdminCalendar() {
+  var state = { month: APP.month, year: APP.year };
+  var html =
+    '<div class="card">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">' +
+    '<h3>📅 ปฏิทินบริษัท</h3>' +
+    '<div style="display:flex;align-items:center;gap:10px;">' +
+    '<button class="btn secondary small" id="calPrev">← ก่อนหน้า</button>' +
+    '<b id="calLabel" style="min-width:78px;text-align:center;"></b>' +
+    '<button class="btn secondary small" id="calNext">ถัดไป →</button>' +
+    '</div></div>' +
+    '<div class="cardSubtitle">ขาด/ลา/มาสายของทุกคนในแต่ละวัน — เชื่อมกับข้อมูลแท็บ "Attendance" โดยตรง ไม่ต้องกรอกซ้ำ</div>' +
+    '<div id="calGrid" class="muted" style="margin-top:14px;">กำลังโหลด...</div>' +
+    '</div>' +
+    '<div class="card"><h3>💵 สรุปเบี้ยขยันเดือนนี้</h3><div class="cardSubtitle">คนละก้อนกับเงินพิเศษ/คะแนนโดยสิ้นเชิง ทุกคน Active ได้เท่ากันหมด หักตามนาทีมาสาย/ประเภทการลาที่เห็นในปฏิทินด้านบนเท่านั้น</div><div id="calDiligence" class="muted">กำลังโหลด...</div></div>';
+  document.getElementById('content').innerHTML = html;
+
+  document.getElementById('calPrev').addEventListener('click', function () { shiftMonth(-1); });
+  document.getElementById('calNext').addEventListener('click', function () { shiftMonth(1); });
+
+  function shiftMonth(delta) {
+    var r = addMonths(state.month, state.year, delta);
+    state.month = r.month; state.year = r.year;
+    load();
+  }
+
+  load();
+
+  function load() {
+    var label = document.getElementById('calLabel');
+    if (label) label.textContent = state.year + '-' + ('0' + state.month).slice(-2);
+    var gridEl = document.getElementById('calGrid');
+    var diliEl = document.getElementById('calDiligence');
+    gridEl.innerHTML = '<div class="muted">กำลังโหลด...</div>';
+    diliEl.innerHTML = '<div class="muted">กำลังโหลด...</div>';
+    Promise.all([
+      apiGet('attendanceLogForMonth', { month: state.month, year: state.year }),
+      apiGet('companyDiligenceSummary', { month: state.month, year: state.year })
+    ]).then(function (results) {
+      if (!document.getElementById('calGrid')) return; // สลับหน้าไปแล้วระหว่างรอโหลด
+      renderGrid(results[0]);
+      renderDiligence(results[1]);
+    }).catch(function (e) {
+      if (!document.getElementById('calGrid')) return;
+      gridEl.innerHTML = '<div class="muted">โหลดไม่สำเร็จ: ' + esc(e.message || String(e)) + ' <button class="btn secondary" id="calRetry" style="margin-left:8px;">ลองใหม่</button></div>';
+      diliEl.innerHTML = '';
+      var retryBtn = document.getElementById('calRetry');
+      if (retryBtn) retryBtn.addEventListener('click', load);
+      toast(e.message || String(e), true);
+    });
+  }
+
+  // แปลง event 1 แถวจาก Attendance ให้เป็นข้อความบรรทัดเดียวแบบเดียวกับที่ใช้ในแท็บ "Attendance" ทุกประการ
+  // (ชื่อ: มาสาย 10 นาที / ชื่อ: ลาป่วยมีใบรับรองแพทย์ / ชื่อ: ขาด) ให้อ่านแล้วเข้าใจตรงกันทั้ง 2 หน้า
+  function eventLineLabel(r) {
+    if (r['สถานะ'] === 'มาสาย' && r['นาทีที่มาสาย'] !== '' && r['นาทีที่มาสาย'] !== undefined && r['นาทีที่มาสาย'] !== null) {
+      return 'สาย ' + r['นาทีที่มาสาย'] + ' นาที';
+    }
+    if ((r['สถานะ'] === 'ลาอนุมัติ' || r['สถานะ'] === 'ลาไม่อนุมัติ') && r['ประเภทการลา']) {
+      return r['ประเภทการลา'];
+    }
+    return r['สถานะ'];
+  }
+
+  function renderGrid(events) {
+    var byDay = {};
+    events.forEach(function (r) {
+      var d = new Date(r['วันที่']);
+      var day = d.getDate();
+      if (!byDay[day]) byDay[day] = [];
+      byDay[day].push({ name: r['ชื่อพนักงาน'], label: eventLineLabel(r), status: r['สถานะ'] });
+    });
+
+    var daysInMonth = new Date(state.year, state.month, 0).getDate(); // month เป็น 1-based อยู่แล้ว trick นี้ได้วันสุดท้ายของเดือนพอดี
+    var firstDow = new Date(state.year, state.month - 1, 1).getDay(); // 0=อา..6=ส
+    var dowLabels = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+    var today = new Date();
+
+    var cellsHtml = '<div class="calDow">' + dowLabels.map(function (d) { return '<div>' + d + '</div>'; }).join('') + '</div>';
+    cellsHtml += '<div class="calDays">';
+    for (var i = 0; i < firstDow; i++) cellsHtml += '<div class="calCell calCellEmpty"></div>';
+    for (var day = 1; day <= daysInMonth; day++) {
+      var dayEvents = byDay[day] || [];
+      var isToday = (today.getFullYear() === state.year && (today.getMonth() + 1) === state.month && today.getDate() === day);
+      cellsHtml += '<div class="calCell' + (isToday ? ' calCellToday' : '') + '"><div class="calDateNum">' + day + '</div>' +
+        dayEvents.map(function (ev) {
+          var cls = ev.status === 'ขาด' ? 'calEvent calEventAbsent' : (ev.status === 'มาสาย' ? 'calEvent calEventLate' : 'calEvent calEventLeave');
+          return '<div class="' + cls + '">' + esc(ev.name) + ': ' + esc(ev.label) + '</div>';
+        }).join('') +
+        '</div>';
+    }
+    var totalCells = firstDow + daysInMonth;
+    var trailing = (7 - (totalCells % 7)) % 7;
+    for (var j = 0; j < trailing; j++) cellsHtml += '<div class="calCell calCellEmpty"></div>';
+    cellsHtml += '</div>';
+    document.getElementById('calGrid').innerHTML = '<div style="overflow-x:auto"><div style="min-width:700px;">' + cellsHtml + '</div></div>';
+  }
+
+  function renderDiligence(rows) {
+    var el = document.getElementById('calDiligence');
+    if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีข้อมูล</div>'; return; }
+    // พนักงานลาออก (Inactive) ที่เดือนนี้ยังทำงานอยู่จริงจะยังโผล่มาด้วย (ดู hasActivityInMonth ใน Code.gs) ใส่ป้าย
+    // "ลาออกแล้ว" ให้แยกแยะจากคนที่ยังทำงานอยู่ปัจจุบัน
+    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th class="colDivider moneyCell">เบี้ยขยัน</th></tr>' +
+      rows.map(function (r) {
+        var nameHtml = esc(r['ชื่อพนักงาน']) + (r['สถานะ'] && r['สถานะ'] !== 'Active' ? ' <span class="inactiveBadge">ลาออกแล้ว</span>' : '');
+        return '<tr' + (r['สถานะ'] && r['สถานะ'] !== 'Active' ? ' class="inactiveRow"' : '') + '><td>' + nameHtml + '</td><td>' + esc(r['แผนก']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เบี้ยขยัน']) + '</td></tr>';
+      }).join('') +
+      '<tr class="totalsRow"><td colspan="2">รวมทั้งหมด (' + rows.length + ' คน)</td><td class="colDivider">' + fmtNum(sumField(rows, 'เบี้ยขยัน')) + '</td></tr>' +
+      '</table></div>';
+  }
+}
+
 /* ---- 8. ประเมิน Work Score (PHASE 2 — A ผลงาน 10 + B คุณภาพ 6 + C ความร่วมมือ 4 = เต็ม 20) ---- */
 // พนักงานแผนก Support & Strategy (Business Operations Lead) ไม่ให้เลือกในนี้ — มีระบบประเมินแยกต่างหากตามที่สั่ง
 // Work Score V2 (รวมหน้า): พี่ขอให้กรอกยอด Sales Field/Online "รวมอยู่ในหน้าเดียวกัน" กับการประเมิน Work Score เลย ไม่ต้องสลับแท็บ
@@ -1197,7 +1323,7 @@ function renderAdminSummary() {
     '<button class="btn secondary" id="csExport">⬇ ดาวน์โหลดเป็น CSV</button>' +
     '<button class="btn secondary" id="csExportPdf">⬇ ดาวน์โหลดเป็น PDF</button>' +
     '</div>' +
-    '<div class="calloutBox" style="margin-top:14px;">คอลัมน์ <b>งาน/ผิด/ขาดลามาสาย/รวม</b> คือ Performance Score เต็ม 100 · <b>ดี/รางวัล/คะแนนรวม (สีส้ม)</b> แยกต่างหากโดยสิ้นเชิง ไม่รวมกับคะแนนรวม 100 คะแนนด้านหน้า · <b>เงินพิเศษ</b> คำนวณจากคะแนนรวมเท่านั้น · <b>เบี้ยขยัน</b> คนละก้อน ทุกคน Active ได้เท่ากันหมด ไม่เกี่ยวกับคะแนนรวมเลย · <b>ค่าเสียหาย</b> (คอลัมน์ขวาสุด แยกเส้นให้เห็นชัดว่าไม่เกี่ยวกับคะแนน/เงินด้านหน้าทั้งหมด) เป็นตัวเลขแสดงผลเฉยๆ จากที่กรอกไว้ตอนบันทึกเหตุการณ์ความผิด ไม่มีผลต่อคะแนน/เงินใดๆ ทั้งสิ้น · แถวล่างสุดของตารางคือยอดรวมเงินพิเศษ/เบี้ยขยัน/ค่าเสียหายของทุกคนที่แสดงอยู่</div>' +
+    '<div class="calloutBox" style="margin-top:14px;">คอลัมน์ <b>งาน/ผิด/ขาดลามาสาย/รวม</b> คือ Performance Score เต็ม 100 · <b>ดี/รางวัล/คะแนนรวม (สีส้ม)</b> แยกต่างหากโดยสิ้นเชิง ไม่รวมกับคะแนนรวม 100 คะแนนด้านหน้า · <b>เงินพิเศษ</b> คำนวณจากคะแนนรวมเท่านั้น · <b>ค่าเสียหาย</b> (คอลัมน์ขวาสุด แยกเส้นให้เห็นชัดว่าไม่เกี่ยวกับคะแนน/เงินด้านหน้าทั้งหมด) เป็นตัวเลขแสดงผลเฉยๆ จากที่กรอกไว้ตอนบันทึกเหตุการณ์ความผิด ไม่มีผลต่อคะแนน/เงินใดๆ ทั้งสิ้น · แถวล่างสุดของตารางคือยอดรวมเงินพิเศษ/ค่าเสียหายของทุกคนที่แสดงอยู่ · ตัวเลขในวงเล็บใต้หัวคอลัมน์เงินพิเศษ/ค่าเสียหาย คือเดือนที่เงินจะออกจริง/ถูกหักจริง (เงินพิเศษ +3 เดือนจากตารางนี้ ค่าเสียหาย +1 เดือน) คำนวณอัตโนมัติตามเดือนที่เลือกดูอยู่ ไม่ต้องนับเอง · <b>เบี้ยขยัน</b> ย้ายไปดู/สรุปที่หน้า "ปฏิทินบริษัท" แทนแล้ว · พนักงานที่ลาออกแล้ว (ติ๊ก Inactive) จะยังโผล่ในตารางของ<b>เดือนที่เขายังทำงานอยู่จริง</b>พร้อมป้าย "ลาออกแล้ว" ให้ตรวจสอบ/ปิดยอดย้อนหลังได้ แต่เดือนที่เขาไม่ได้ทำงานแล้วจะไม่โผล่มาอีก (เงินพิเศษของเดือนที่ลาออกจะค้างไว้ตามยอดที่เคยคำนวณตอนยัง Active อยู่จริง ไม่คำนวณซ้ำ)</div>' +
     '<div id="csOverrideNote"></div></div>' +
     '<div class="card"><div id="csList" class="muted">กำลังโหลด...</div></div>';
   document.getElementById('content').innerHTML = html;
@@ -1238,25 +1364,41 @@ function renderAdminSummary() {
     if (n > 0) return '<span style="color:var(--red);font-weight:700;">-' + fmtNum(n) + '</span>';
     return fmtNum(0);
   }
-  function sumField(rows, key) {
-    return rows.reduce(function (sum, r) { var n = Number(r[key]); return sum + (isNaN(n) ? 0 : n); }, 0);
+  // คำนวณ "เดือนที่เงินออกจริง/ถูกหักจริง" จากเดือนของตารางที่กำลังดูอยู่ (cs_m/cs_y) ล้วนๆ ไม่เกี่ยวกับสูตรคำนวณคะแนน/เงิน
+  // ใดๆ ทั้งสิ้น เป็นแค่ป้ายข้อความช่วยจำในหัวคอลัมน์เท่านั้น — เงินพิเศษจ่ายจริง 3 เดือนถัดจากเดือนตาราง, ค่าเสียหาย
+  // ตัดรอบเดือนถัดไป ตามที่พี่กำหนด (ปีเปลี่ยนข้ามปีก็คำนวณให้ถูกต้องอัตโนมัติ เช่น ตาราง พ.ย. + 3 เดือน = ก.พ.ปีถัดไป)
+  // (addMonths/sumField เป็นฟังก์ชันกลางที่ใช้ร่วมกับหน้า "ปฏิทินบริษัท" แล้ว — ดูใกล้ๆ fmtNum ด้านบนของไฟล์)
+  function payoutMonthLabel(delta, tableMonth, tableYear) {
+    var r = addMonths(tableMonth, tableYear, delta);
+    return r.year === Number(tableYear) ? String(r.month) : (r.month + '/' + r.year); // ข้ามปีถึงจะโชว์ปีกำกับด้วย กันสับสน
+  }
+  // พนักงานที่ลาออกแล้ว (Inactive) แต่เดือนที่กำลังดูอยู่ยังมีข้อมูลจริง (เช่น ลาออกกลาง/ปลายเดือน) จะยังโผล่ในตาราง
+  // เพื่อให้ตรวจสอบ/ปิดยอดคะแนนผิด+ค่าเสียหายย้อนหลังได้ — ใส่ป้าย "ลาออกแล้ว" ให้เห็นชัดว่าไม่ใช่พนักงานปัจจุบัน
+  function nameCellHtml(r) {
+    if (r['สถานะ'] && r['สถานะ'] !== 'Active') {
+      return esc(r['ชื่อพนักงาน']) + ' <span class="inactiveBadge">ลาออกแล้ว</span>';
+    }
+    return esc(r['ชื่อพนักงาน']);
   }
   function render() {
     var rows = filteredSortedRows();
     var el = document.getElementById('csList');
     if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีข้อมูล</div>'; return; }
     var totalIncentive = sumField(rows, 'เงินพิเศษ');
-    var totalDiligence = sumField(rows, 'เบี้ยขยัน');
     var totalDamage = sumField(rows, 'ค่าความเสียหาย');
-    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>กลุ่มเงินพิเศษ</th><th>งาน</th><th>ผิด</th><th>ขาด/ลา/สาย</th><th class="colDivider">รวม</th><th class="colDivider">ดี</th><th>รางวัล</th><th class="amberCell">คะแนนรวม</th><th class="colDivider">เงินพิเศษ</th><th class="colDivider">เบี้ยขยัน</th><th class="colDivider">ค่าเสียหาย</th></tr>' +
-      rows.map(function (r) { return '<tr><td>' + esc(r['ชื่อพนักงาน']) + '</td><td>' + esc(r['แผนก']) + '</td><td>' + esc(r['กลุ่มเงินพิเศษ']) + '</td><td>' + fmtNum(r['คะแนนงาน']) + '</td><td>' + fmtNum(r['คะแนนความผิด']) + '</td><td>' + fmtNum(r['คะแนนขาดลามาสาย']) + '</td><td class="colDivider totalCell">' + fmtNum(r['คะแนนรวม']) + '</td><td class="colDivider">' + fmtNum(r['คะแนนทำความดี']) + '</td><td>' + fmtNum(r['คะแนนแจ้งรางวัล']) + '</td><td class="amberCell">' + fmtNum(r['Reward Points สะสม']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เงินพิเศษ']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เบี้ยขยัน']) + '</td><td class="colDivider">' + damageCellHtml(r['ค่าความเสียหาย']) + '</td></tr>'; }).join('') +
-      '<tr class="totalsRow"><td colspan="10">รวมทั้งหมด (' + rows.length + ' คน)</td><td class="colDivider">' + fmtNum(totalIncentive) + '</td><td class="colDivider">' + fmtNum(totalDiligence) + '</td><td class="colDivider">' + damageCellHtml(totalDamage) + '</td></tr>' +
+    var tableMonth = Number(document.getElementById('cs_m').value);
+    var tableYear = Number(document.getElementById('cs_y').value);
+    var incentiveMonthNote = '(ออกเดือน' + payoutMonthLabel(3, tableMonth, tableYear) + ')';
+    var damageMonthNote = '(หักเดือน' + payoutMonthLabel(1, tableMonth, tableYear) + ')';
+    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>กลุ่มเงินพิเศษ</th><th>งาน</th><th>ผิด</th><th>ขาด/ลา/สาย</th><th class="colDivider">รวม</th><th class="colDivider">ดี</th><th>รางวัล</th><th class="amberCell">คะแนนรวม</th><th class="colDivider">เงินพิเศษ<span class="thNote">' + incentiveMonthNote + '</span></th><th class="colDivider">ค่าเสียหาย<span class="thNote">' + damageMonthNote + '</span></th></tr>' +
+      rows.map(function (r) { return '<tr' + (r['สถานะ'] && r['สถานะ'] !== 'Active' ? ' class="inactiveRow"' : '') + '><td>' + nameCellHtml(r) + '</td><td>' + esc(r['แผนก']) + '</td><td>' + esc(r['กลุ่มเงินพิเศษ']) + '</td><td>' + fmtNum(r['คะแนนงาน']) + '</td><td>' + fmtNum(r['คะแนนความผิด']) + '</td><td>' + fmtNum(r['คะแนนขาดลามาสาย']) + '</td><td class="colDivider totalCell">' + fmtNum(r['คะแนนรวม']) + '</td><td class="colDivider">' + fmtNum(r['คะแนนทำความดี']) + '</td><td>' + fmtNum(r['คะแนนแจ้งรางวัล']) + '</td><td class="amberCell">' + fmtNum(r['Reward Points สะสม']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เงินพิเศษ']) + '</td><td class="colDivider">' + damageCellHtml(r['ค่าความเสียหาย']) + '</td></tr>'; }).join('') +
+      '<tr class="totalsRow"><td colspan="10">รวมทั้งหมด (' + rows.length + ' คน)</td><td class="colDivider">' + fmtNum(totalIncentive) + '</td><td class="colDivider">' + damageCellHtml(totalDamage) + '</td></tr>' +
       '</table></div>';
   }
   document.getElementById('csExport').addEventListener('click', function () {
     var rows = filteredSortedRows();
     if (!rows.length) { toast('ไม่มีข้อมูลให้ดาวน์โหลด', true); return; }
-    var cols = ['รหัสพนักงาน', 'ชื่อพนักงาน', 'แผนก', 'กลุ่มเงินพิเศษ', 'คะแนนงาน', 'คะแนนความผิด', 'คะแนนขาดลามาสาย', 'คะแนนรวม', 'คะแนนทำความดี', 'คะแนนแจ้งรางวัล', 'Reward Points สะสม', 'เงินพิเศษ', 'เบี้ยขยัน', 'ค่าความเสียหาย'];
+    var cols = ['รหัสพนักงาน', 'ชื่อพนักงาน', 'สถานะ', 'แผนก', 'กลุ่มเงินพิเศษ', 'คะแนนงาน', 'คะแนนความผิด', 'คะแนนขาดลามาสาย', 'คะแนนรวม', 'คะแนนทำความดี', 'คะแนนแจ้งรางวัล', 'Reward Points สะสม', 'เงินพิเศษ', 'ค่าความเสียหาย'];
     var csv = cols.join(',') + '\n' + rows.map(function (r) {
       return cols.map(function (c) {
         var v = r[c];
