@@ -1236,7 +1236,8 @@ function renderAdminWorkScore() {
     '<div class="card"><h3>🗒️ ผู้ประเมิน & หมายเหตุ</h3>' +
     '<label>ผู้ประเมิน</label><input type="text" id="wsEvaluator" placeholder="ชื่อผู้ประเมิน">' +
     '<label>หมายเหตุ</label><textarea id="wsNote" placeholder="เช่น เดือนนี้รับงานเพิ่มและสามารถปิดงานได้เอง"></textarea>' +
-    '<button class="btn" id="wsSave">✓ บันทึกคะแนน Work Score</button>' +
+    '<button class="btn" id="wsSave">✓ บันทึกคะแนน Work Score</button> ' +
+    '<button class="btn secondary" id="wsDelete" style="display:none;color:#c0392b;border-color:#c0392b;">🗑️ ลบการประเมินนี้ (เลือกคนผิด)</button>' +
     '<div class="muted" style="margin-top:8px;">กดปุ่มนี้แล้วคะแนนรวม/เงินพิเศษจะไปอัปเดตที่ "สรุปคะแนน/เงิน" และ Dashboard ทันที — แค่กรอกยอดขายด้านบนเฉยๆ ยังไม่นับ ต้องกดปุ่มนี้ด้วยเสมอ</div></div>';
   document.getElementById('content').innerHTML = html;
   if (!eligible.length) { return; }
@@ -1388,6 +1389,7 @@ function renderAdminWorkScore() {
     setTextIfExists('wsExisting', 'กำลังโหลด...');
     var autoBox = document.getElementById('wsAutoCalc');
     if (autoBox) { autoBox.style.display = 'none'; autoBox.innerHTML = ''; }
+    var delBtnLoading = document.getElementById('wsDelete'); if (delBtnLoading) delBtnLoading.style.display = 'none';
     apiGet('scoreWeights', { month: month, year: year }).then(function (w) {
       var note = document.getElementById('wsWeightNote');
       if (!note) return; // สลับหน้าไปแล้วระหว่างรอโหลด
@@ -1404,11 +1406,13 @@ function renderAdminWorkScore() {
         setValIfExists('wsEvaluator', d.evaluator);
         setValIfExists('wsNote', d.note);
         setTextIfExists('wsExisting', 'เคยประเมินไว้แล้ว โดย ' + esc(d.evaluator) + (d.evalDate ? (' เมื่อ ' + fmtDate(d.evalDate)) : '') + ' — แก้แล้วกดบันทึกซ้ำได้');
+        var delBtn = document.getElementById('wsDelete'); if (delBtn) { delBtn.style.display = ''; delBtn.disabled = false; }
         updateSum();
       } else {
         setValIfExists('wsA', ''); setValIfExists('wsB', ''); setValIfExists('wsC', '');
         setValIfExists('wsEvaluator', ''); setValIfExists('wsNote', '');
         setTextIfExists('wsExisting', 'ยังไม่เคยประเมินเดือนนี้');
+        var delBtnHide = document.getElementById('wsDelete'); if (delBtnHide) delBtnHide.style.display = 'none';
         updateSum();
         // Work Score V2: เซลส์วิ่ง (แผนก Sales) ยังไม่เคยประเมินเดือนนี้ → เสนอคะแนน A/B อัตโนมัติจากยอด Sales Field เดือนนั้นให้เลย
         // (emp ประกาศไว้ด้านบนของ loadExisting() แล้ว ใช้ตัวเดียวกับที่ renderMonthlyArea ใช้)
@@ -1435,6 +1439,26 @@ function renderAdminWorkScore() {
     withButtonGuard(evt.target, function () { return apiPost('setWorkScore', payload); })
       .then(function () { toast('บันทึกคะแนน Work Score แล้ว — ไปดูคะแนนรวม/เงินพิเศษได้ที่ "สรุปคะแนน/เงิน"'); loadExisting(); }).catch(function (e) { toast(e.message || String(e), true); });
   });
+
+  // "ลบการประเมินนี้" — ใช้ตอนเผลอเลือกพนักงานผิดคนตอนประเมิน (ข้อมูลที่กรอกถูกแต่ลงผิดคน) ปุ่มนี้โชว์เฉพาะตอนที่คนนี้
+  // เคยถูกประเมินเดือนนี้แล้วเท่านั้น (ดู loadExisting) กดแล้วล้างคะแนน Work Score ของ "คนนี้ เดือนนี้" กลับไปเป็น
+  // "ยังไม่เคยประเมิน" ไม่กระทบคะแนน Error/ขาดลามาสาย/ทำความดีของคนนี้เลย (คนละชีตกัน คำนวณแยกอิสระจากกันเสมอ)
+  var wsDeleteBtn = document.getElementById('wsDelete');
+  if (wsDeleteBtn) {
+    wsDeleteBtn.addEventListener('click', function () {
+      var employeeId = document.getElementById('wsEmp').value;
+      var month = Number(document.getElementById('ws_m').value), year = Number(document.getElementById('ws_y').value);
+      var emp = APP.employees.filter(function (e) { return e.id === employeeId; })[0];
+      var empLabel = emp ? emp.name : employeeId;
+      if (!confirm('ยืนยันลบการประเมิน Work Score ของ "' + empLabel + '" เดือน ' + month + '/' + year + ' ทิ้ง?\n\n' +
+        'ใช้ตอนเผลอเลือกพนักงานผิดคนตอนประเมิน — จะล้างเฉพาะคะแนน Work Score ของคนนี้เดือนนี้กลับเป็น "ยังไม่เคยประเมิน" ' +
+        'ไม่กระทบคะแนน Error/ขาดลามาสาย/ทำความดีของคนนี้เลย กู้คืนไม่ได้')) return;
+      wsDeleteBtn.disabled = true;
+      apiPost('deleteWorkScore', { employeeId: employeeId, month: month, year: year })
+        .then(function () { toast('ลบการประเมินแล้ว — เลือกพนักงานที่ถูกต้องแล้วประเมินใหม่ได้เลย'); loadExisting(); })
+        .catch(function (e) { wsDeleteBtn.disabled = false; toast(e.message || String(e), true); });
+    });
+  }
 }
 
 /* ---- 9. สรุปคะแนน/เงิน ---- */
