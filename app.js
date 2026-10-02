@@ -1189,13 +1189,15 @@ function renderAdminWorkScore() {
       '<button class="btn secondary" id="wsSmOnlineSave">✓ บันทึกยอดขาย</button></div>';
   }
 
+  // Work Score V2 (โหลดหน้าเดียวเร็วขึ้น): เดิมฟังก์ชันนี้ยิง apiGet('salesMonthlyOne', ...) เองทุกครั้งที่สลับคน — ตอนนี้
+  // อ่านจากแคช wsBulk (โหลดมาแล้วทั้งเดือนตอนเปิดหน้า/เปลี่ยนเดือน) แทน ไม่มีการยิง Server ตอนสลับคนอีกต่อไป สลับเร็วทันที
   function renderMonthlyArea(emp, employeeId, month, year) {
     var area = document.getElementById('wsMonthlyArea');
     if (!emp || (emp.department !== 'Sales' && emp.department !== 'Online')) { area.innerHTML = ''; return; }
     if (emp.department === 'Sales') {
       area.innerHTML = workScoreSalesFieldFormHtml();
-      apiGet('salesMonthlyOne', { kind: 'field', employeeId: employeeId, month: month, year: year }).then(function (row) {
-        if (!row || !document.getElementById('wsSmPersonalSales')) return; // ไม่มีข้อมูลเดิม หรือสลับหน้าไปแล้วระหว่างรอโหลด
+      var row = wsBulk && wsBulk.salesField[employeeId];
+      if (row) {
         setValIfExists('wsSmPersonalSales', row['ยอดขายส่วนตัว'] || '');
         setValIfExists('wsSmTarget', row['เป้ายอดขายส่วนตัว'] || '');
         setValIfExists('wsSmNewCustomers', row['จำนวนลูกค้าใหม่'] || '');
@@ -1203,7 +1205,7 @@ function renderAdminWorkScore() {
         setValIfExists('wsSmPush', row['ยอดขายสินค้าผลักดัน'] || '');
         setValIfExists('wsSmOutstanding', row['ยอดค้างชำระ'] || '');
         setValIfExists('wsSmNote', row['หมายเหตุ'] || '');
-      }).catch(function () { /* โหลดข้อมูลเดิมไม่สำเร็จ ปล่อยเป็นฟอร์มว่างให้กรอกใหม่ */ });
+      }
       document.getElementById('wsSmSave').addEventListener('click', function (evt) {
         var payload = {
           employeeId: employeeId, month: month, year: year,
@@ -1216,20 +1218,20 @@ function renderAdminWorkScore() {
           note: document.getElementById('wsSmNote').value
         };
         withButtonGuard(evt.target, function () { return apiPost('upsertSalesMonthly', { kind: 'field', payload: payload }); })
-          .then(function () { toast('บันทึกยอดขายแล้ว'); loadSalesFieldSuggestion(employeeId, month, year); })
+          .then(function () { toast('บันทึกยอดขายแล้ว'); return loadBulkThenRender(); })
           .catch(function (e) { toast(e.message || String(e), true); });
       });
     } else {
       area.innerHTML = workScoreSalesOnlineFormHtml();
-      apiGet('salesMonthlyOne', { kind: 'online', employeeId: employeeId, month: month, year: year }).then(function (row) {
-        if (!row || !document.getElementById('wsSmSales')) return; // ไม่มีข้อมูลเดิม หรือสลับหน้าไปแล้วระหว่างรอโหลด
-        setValIfExists('wsSmSales', row['ยอดขาย'] || '');
-        setValIfExists('wsSmOnlineNewCustomers', row['ลูกค้าใหม่'] || '');
-        setValIfExists('wsSmManaged', row['ลูกค้าที่ดูแล'] || '');
-        setValIfExists('wsSmOrderCount', row['Order'] || '');
-        setValIfExists('wsSmOrderIssue', row['ปัญหา/Order ผิด'] || '');
-        setValIfExists('wsSmOnlineNote', row['หมายเหตุ'] || '');
-      }).catch(function () { /* โหลดข้อมูลเดิมไม่สำเร็จ ปล่อยเป็นฟอร์มว่างให้กรอกใหม่ */ });
+      var rowOnline = wsBulk && wsBulk.salesOnline[employeeId];
+      if (rowOnline) {
+        setValIfExists('wsSmSales', rowOnline['ยอดขาย'] || '');
+        setValIfExists('wsSmOnlineNewCustomers', rowOnline['ลูกค้าใหม่'] || '');
+        setValIfExists('wsSmManaged', rowOnline['ลูกค้าที่ดูแล'] || '');
+        setValIfExists('wsSmOrderCount', rowOnline['Order'] || '');
+        setValIfExists('wsSmOrderIssue', rowOnline['ปัญหา/Order ผิด'] || '');
+        setValIfExists('wsSmOnlineNote', rowOnline['หมายเหตุ'] || '');
+      }
       document.getElementById('wsSmOnlineSave').addEventListener('click', function (evt) {
         var payload = {
           employeeId: employeeId, month: month, year: year,
@@ -1241,7 +1243,7 @@ function renderAdminWorkScore() {
           note: document.getElementById('wsSmOnlineNote').value
         };
         withButtonGuard(evt.target, function () { return apiPost('upsertSalesMonthly', { kind: 'online', payload: payload }); })
-          .then(function () { toast('บันทึกยอดขายแล้ว'); })
+          .then(function () { toast('บันทึกยอดขายแล้ว'); return loadBulkThenRender(); })
           .catch(function (e) { toast(e.message || String(e), true); });
       });
     }
@@ -1249,30 +1251,31 @@ function renderAdminWorkScore() {
 
   // Work Score V2 (รอบยืนยันล่าสุด): พี่ขอให้ข้อ C ของเซลส์วิ่ง/ออนไลน์ "ให้เต็มอัตโนมัติเสมอ" (ไม่ต้องมโนแยก) เพราะ A+B
   // คำนวณจากตัวเลขจริงหมดแล้ว — ยังแก้ไขเป็นตัวเลขอื่นได้เองก่อนกดบันทึก ถ้ามีเหตุผลจะปรับลดจริงๆ (เช่น ส่งรายงานช้ามาก)
+  // Work Score V2 (โหลดหน้าเดียวเร็วขึ้น): เดิมฟังก์ชันนี้ยิง apiGet('salesMonthlyOne', ...) เองทุกครั้งที่สลับคน — ตอนนี้
+  // อ่านจากแคช wsBulk แทน (ไม่มีการยิง Server ตอนสลับคนอีกต่อไป) ชื่อ/พฤติกรรมคำนวณเหมือนเดิมทุกประการ
   var COOPERATION_DEFAULT_FULL = 4;
-  function loadSalesFieldSuggestion(employeeId, month, year) {
+  function applySalesFieldSuggestion(employeeId) {
     setValIfExists('wsC', COOPERATION_DEFAULT_FULL); // ให้เต็มไปก่อนเลย ไม่ต้องรอผลยอดขายก็กำหนดได้
-    apiGet('salesMonthlyOne', { kind: 'field', employeeId: employeeId, month: month, year: year }).then(function (row) {
-      var box = document.getElementById('wsAutoCalc');
-      if (!box || !document.getElementById('wsA')) return; // สลับหน้าไปแล้วระหว่างรอโหลด — ไม่มีอะไรให้อัปเดต
-      box.style.display = 'block';
-      if (!row) {
-        box.innerHTML = '⚠️ ยังไม่มีข้อมูล Sales Field เดือนนี้ของคนนี้ — กรอกในการ์ด "Sales Field — กรอกยอดเดือนนี้" ด้านบนก่อน ระบบจะคำนวณ A/B ให้อัตโนมัติ (ข้อ C ให้เต็ม ' + COOPERATION_DEFAULT_FULL + ' ไว้ก่อนแล้ว)';
-        updateSum();
-        return;
-      }
-      // B = ลูกค้าใหม่ + ลูกค้าที่ดึงกลับ + ยอดขายสินค้าผลักดัน (เกณฑ์คงที่ ≥10 เจ้า/≥10 เจ้า/≥50,000 บาท = เต็มข้อละ 2 คะแนน)
-      var aScore = ratioScore(row['ยอดขายส่วนตัว'], row['เป้ายอดขายส่วนตัว'], 10);
-      var bScore = (ratioScore(row['จำนวนลูกค้าใหม่'], 10, 2) || 0)
-        + (ratioScore(row['จำนวนลูกค้าที่ดึงกลับ'], 10, 2) || 0)
-        + (ratioScore(row['ยอดขายสินค้าผลักดัน'], 50000, 2) || 0);
-      setValIfExists('wsA', aScore === null ? 0 : aScore);
-      setValIfExists('wsB', bScore);
-      box.innerHTML = (aScore === null
-        ? '⚠️ ยังไม่ได้กรอก "เป้ายอดขายส่วนตัว" เดือนนี้ — ตั้งข้อ A เป็น 0 ไปก่อน กรอกเป้าในการ์ด "Sales Field — กรอกยอดเดือนนี้" ด้านบนแล้วกด "บันทึกยอดขาย" อีกครั้ง ระบบจะคำนวณ A ให้ใหม่ทันที'
-        : '🧮 คำนวณ Work Score ให้อัตโนมัติจากข้อมูล Sales Field เดือนนี้แล้ว (ยอดขาย ' + fmtNum(row['ยอดขายส่วนตัว']) + ' / เป้า ' + fmtNum(row['เป้ายอดขายส่วนตัว']) + ') — A/B มาจากตัวเลขจริง, C ให้เต็ม ' + COOPERATION_DEFAULT_FULL + ' อัตโนมัติ (แก้ไขเองได้ทุกข้อก่อนกดบันทึก)') ;
+    var box = document.getElementById('wsAutoCalc');
+    if (!box || !document.getElementById('wsA')) return; // สลับหน้าไปแล้ว — ไม่มีอะไรให้อัปเดต
+    var row = wsBulk && wsBulk.salesField[employeeId];
+    box.style.display = 'block';
+    if (!row) {
+      box.innerHTML = '⚠️ ยังไม่มีข้อมูล Sales Field เดือนนี้ของคนนี้ — กรอกในการ์ด "Sales Field — กรอกยอดเดือนนี้" ด้านบนก่อน ระบบจะคำนวณ A/B ให้อัตโนมัติ (ข้อ C ให้เต็ม ' + COOPERATION_DEFAULT_FULL + ' ไว้ก่อนแล้ว)';
       updateSum();
-    }).catch(function () { var box = document.getElementById('wsAutoCalc'); if (box) box.style.display = 'none'; /* ดึงไม่สำเร็จ ไม่รบกวน ให้กรอกเองตามปกติ */ });
+      return;
+    }
+    // B = ลูกค้าใหม่ + ลูกค้าที่ดึงกลับ + ยอดขายสินค้าผลักดัน (เกณฑ์คงที่ ≥10 เจ้า/≥10 เจ้า/≥50,000 บาท = เต็มข้อละ 2 คะแนน)
+    var aScore = ratioScore(row['ยอดขายส่วนตัว'], row['เป้ายอดขายส่วนตัว'], 10);
+    var bScore = (ratioScore(row['จำนวนลูกค้าใหม่'], 10, 2) || 0)
+      + (ratioScore(row['จำนวนลูกค้าที่ดึงกลับ'], 10, 2) || 0)
+      + (ratioScore(row['ยอดขายสินค้าผลักดัน'], 50000, 2) || 0);
+    setValIfExists('wsA', aScore === null ? 0 : aScore);
+    setValIfExists('wsB', bScore);
+    box.innerHTML = (aScore === null
+      ? '⚠️ ยังไม่ได้กรอก "เป้ายอดขายส่วนตัว" เดือนนี้ — ตั้งข้อ A เป็น 0 ไปก่อน กรอกเป้าในการ์ด "Sales Field — กรอกยอดเดือนนี้" ด้านบนแล้วกด "บันทึกยอดขาย" อีกครั้ง ระบบจะคำนวณ A ให้ใหม่ทันที'
+      : '🧮 คำนวณ Work Score ให้อัตโนมัติจากข้อมูล Sales Field เดือนนี้แล้ว (ยอดขาย ' + fmtNum(row['ยอดขายส่วนตัว']) + ' / เป้า ' + fmtNum(row['เป้ายอดขายส่วนตัว']) + ') — A/B มาจากตัวเลขจริง, C ให้เต็ม ' + COOPERATION_DEFAULT_FULL + ' อัตโนมัติ (แก้ไขเองได้ทุกข้อก่อนกดบันทึก)') ;
+    updateSum();
   }
 
   // ชื่อหัวข้อ C เปลี่ยนเป็น "ความร่วมมือและการส่งรายงาน" เฉพาะแผนกเซลส์ (วิ่ง/ออนไลน์) ตามที่พี่ขอ — แผนกอื่นยังใช้ชื่อเดิม
@@ -1282,49 +1285,70 @@ function renderAdminWorkScore() {
     setTextIfExists('wsCLabel', isSales ? 'C. ความร่วมมือและการส่งรายงาน (0-4)' : 'C. ความร่วมมือและทัศนคติในการทำงาน (0-4)');
   }
 
-  function loadExisting() {
+  // Work Score V2 (โหลดหน้าเดียวเร็วขึ้น ตามที่พี่ขอ — "โหลดแต่ละคนนานอ่ะ"): เดิมสลับพนักงานใน Dropdown แต่ละครั้งจะยิง
+  // apiGet ใหม่ 2-3 รอบเสมอ (scoreWeights + workScoreDetail + salesMonthlyOne) ซึ่ง Apps Script ตอบช้าโดยธรรมชาติ ยิ่งสลับ
+  // หลายคนยิ่งสะสมเวลารอ — ตอนนี้เปลี่ยนมาโหลดข้อมูล "ทุกคนในเดือนนั้น" มาครั้งเดียวด้วย workScoreBulk แล้วเก็บไว้ใน wsBulk
+  // สลับคนใน Dropdown เดิมจะอ่านจากแคชนี้ล้วนๆ (renderFromCache) ไม่มีการยิง Server อีกเลย จนกว่าจะกดเปลี่ยนเดือน/บันทึก
+  // ใหม่ (loadBulkThenRender) — แต่ละแผนกยังขึ้นฟอร์มไม่เหมือนกันเหมือนเดิมทุกประการ (Sales/Online มีการ์ดเพิ่ม แผนกอื่นไม่มี)
+  var wsBulk = null; // { month, year, weights, detail:{empId:{...}}, salesField:{empId:{...}}, salesOnline:{empId:{...}} }
+
+  function renderFromCache() {
     var employeeId = document.getElementById('wsEmp').value;
     var month = Number(document.getElementById('ws_m').value), year = Number(document.getElementById('ws_y').value);
     var emp = APP.employees.filter(function (e) { return e.id === employeeId; })[0];
     renderMonthlyArea(emp, employeeId, month, year);
     updateCLabel(emp);
-    setTextIfExists('wsExisting', 'กำลังโหลด...');
     var autoBox = document.getElementById('wsAutoCalc');
     if (autoBox) { autoBox.style.display = 'none'; autoBox.innerHTML = ''; }
-    var delBtnLoading = document.getElementById('wsDelete'); if (delBtnLoading) delBtnLoading.style.display = 'none';
-    apiGet('scoreWeights', { month: month, year: year }).then(function (w) {
-      var note = document.getElementById('wsWeightNote');
-      if (!note) return; // สลับหน้าไปแล้วระหว่างรอโหลด
+    var note = document.getElementById('wsWeightNote');
+    if (note) {
+      var w = wsBulk ? wsBulk.weights : null;
       note.innerHTML = (w && w.overridden)
         ? '<div class="calloutBox mt0">📌 เดือนนี้ใช้สัดส่วนคะแนนพิเศษ: Work Score เต็ม ' + w.workWeight + ' (ไม่นับ' + (w.workWeight === 0 ? ' เลย' : '') + ') + Error เต็ม ' + w.errorWeight + ' + Attendance เต็ม ' + w.attendanceWeight + ' — กรอกคะแนนด้านล่างได้ตามปกติ แต่จะไม่มีผลกับคะแนนรวมเดือนนี้ถ้า Work Weight = 0</div>'
         : '';
-    }).catch(function () { var note = document.getElementById('wsWeightNote'); if (note) note.innerHTML = ''; });
-    apiGet('workScoreDetail', { employeeId: employeeId, month: month, year: year }).then(function (d) {
-      if (!document.getElementById('wsA')) return; // สลับหน้าไปแล้วระหว่างรอโหลด — ไม่มีอะไรให้อัปเดต ไม่ต้อง toast error
-      if (d) {
-        setValIfExists('wsA', d.workA);
-        setValIfExists('wsB', d.workB);
-        setValIfExists('wsC', d.workC);
-        setValIfExists('wsEvaluator', d.evaluator);
-        setValIfExists('wsNote', d.note);
-        setTextIfExists('wsExisting', 'เคยประเมินไว้แล้ว โดย ' + esc(d.evaluator) + (d.evalDate ? (' เมื่อ ' + fmtDate(d.evalDate)) : '') + ' — แก้แล้วกดบันทึกซ้ำได้');
-        var delBtn = document.getElementById('wsDelete'); if (delBtn) { delBtn.style.display = ''; delBtn.disabled = false; }
-        updateSum();
-      } else {
-        setValIfExists('wsA', ''); setValIfExists('wsB', ''); setValIfExists('wsC', '');
-        setValIfExists('wsEvaluator', ''); setValIfExists('wsNote', '');
-        setTextIfExists('wsExisting', 'ยังไม่เคยประเมินเดือนนี้');
-        var delBtnHide = document.getElementById('wsDelete'); if (delBtnHide) delBtnHide.style.display = 'none';
-        updateSum();
-        // Work Score V2: เซลส์วิ่ง (แผนก Sales) ยังไม่เคยประเมินเดือนนี้ → เสนอคะแนน A/B อัตโนมัติจากยอด Sales Field เดือนนั้นให้เลย
-        // (emp ประกาศไว้ด้านบนของ loadExisting() แล้ว ใช้ตัวเดียวกับที่ renderMonthlyArea ใช้)
-        if (emp && emp.department === 'Sales') loadSalesFieldSuggestion(employeeId, month, year);
-      }
-    }).catch(function (e) { if (document.getElementById('wsA')) toast(e.message || String(e), true); });
+    }
+    var d = wsBulk ? wsBulk.detail[employeeId] : null;
+    var delBtn = document.getElementById('wsDelete');
+    if (d) {
+      setValIfExists('wsA', d.workA);
+      setValIfExists('wsB', d.workB);
+      setValIfExists('wsC', d.workC);
+      setValIfExists('wsEvaluator', d.evaluator);
+      setValIfExists('wsNote', d.note);
+      setTextIfExists('wsExisting', 'เคยประเมินไว้แล้ว โดย ' + esc(d.evaluator) + (d.evalDate ? (' เมื่อ ' + fmtDate(d.evalDate)) : '') + ' — แก้แล้วกดบันทึกซ้ำได้');
+      if (delBtn) { delBtn.style.display = ''; delBtn.disabled = false; }
+      updateSum();
+    } else {
+      setValIfExists('wsA', ''); setValIfExists('wsB', ''); setValIfExists('wsC', '');
+      setValIfExists('wsEvaluator', ''); setValIfExists('wsNote', '');
+      setTextIfExists('wsExisting', 'ยังไม่เคยประเมินเดือนนี้');
+      if (delBtn) delBtn.style.display = 'none';
+      updateSum();
+      // Work Score V2: เซลส์วิ่ง (แผนก Sales) ยังไม่เคยประเมินเดือนนี้ → เสนอคะแนน A/B อัตโนมัติจากยอด Sales Field เดือนนั้นให้เลย
+      if (emp && emp.department === 'Sales') applySalesFieldSuggestion(employeeId);
+    }
   }
-  document.getElementById('wsEmp').addEventListener('change', loadExisting);
-  document.getElementById('ws_go').addEventListener('click', loadExisting);
-  loadExisting();
+
+  function loadBulkThenRender() {
+    var month = Number(document.getElementById('ws_m').value), year = Number(document.getElementById('ws_y').value);
+    setTextIfExists('wsExisting', 'กำลังโหลด...');
+    var note = document.getElementById('wsWeightNote'); if (note) note.innerHTML = '';
+    var delBtnLoading = document.getElementById('wsDelete'); if (delBtnLoading) delBtnLoading.style.display = 'none';
+    return apiGet('workScoreBulk', { month: month, year: year }).then(function (bulk) {
+      if (!document.getElementById('wsEmp')) return; // สลับหน้าไปแล้วระหว่างรอโหลด
+      wsBulk = {
+        month: month, year: year,
+        weights: (bulk && bulk.weights) || {},
+        detail: (bulk && bulk.detail) || {},
+        salesField: (bulk && bulk.salesField) || {},
+        salesOnline: (bulk && bulk.salesOnline) || {}
+      };
+      renderFromCache();
+    }).catch(function (e) { if (document.getElementById('wsEmp')) toast(e.message || String(e), true); });
+  }
+  document.getElementById('wsEmp').addEventListener('change', renderFromCache); // สลับคน = อ่านแคช ไม่ยิง Server แล้ว เร็วทันที
+  document.getElementById('ws_go').addEventListener('click', loadBulkThenRender); // เปลี่ยนเดือน/ปี = โหลดแคชใหม่ทั้งเดือน
+  loadBulkThenRender();
 
   document.getElementById('wsSave').addEventListener('click', function (evt) {
     var a = document.getElementById('wsA').value, b = document.getElementById('wsB').value, c = document.getElementById('wsC').value;
@@ -1339,11 +1363,11 @@ function renderAdminWorkScore() {
       workA: a, workB: b, workC: c, evaluator: evaluator, note: document.getElementById('wsNote').value
     };
     withButtonGuard(evt.target, function () { return apiPost('setWorkScore', payload); })
-      .then(function () { toast('บันทึกคะแนน Work Score แล้ว — ไปดูคะแนนรวม/เงินพิเศษได้ที่ "สรุปคะแนน/เงิน"'); loadExisting(); }).catch(function (e) { toast(e.message || String(e), true); });
+      .then(function () { toast('บันทึกคะแนน Work Score แล้ว — ไปดูคะแนนรวม/เงินพิเศษได้ที่ "สรุปคะแนน/เงิน"'); loadBulkThenRender(); }).catch(function (e) { toast(e.message || String(e), true); });
   });
 
   // "ลบการประเมินนี้" — ใช้ตอนเผลอเลือกพนักงานผิดคนตอนประเมิน (ข้อมูลที่กรอกถูกแต่ลงผิดคน) ปุ่มนี้โชว์เฉพาะตอนที่คนนี้
-  // เคยถูกประเมินเดือนนี้แล้วเท่านั้น (ดู loadExisting) กดแล้วล้างคะแนน Work Score ของ "คนนี้ เดือนนี้" กลับไปเป็น
+  // เคยถูกประเมินเดือนนี้แล้วเท่านั้น (ดู renderFromCache) กดแล้วล้างคะแนน Work Score ของ "คนนี้ เดือนนี้" กลับไปเป็น
   // "ยังไม่เคยประเมิน" ไม่กระทบคะแนน Error/ขาดลามาสาย/ทำความดีของคนนี้เลย (คนละชีตกัน คำนวณแยกอิสระจากกันเสมอ)
   var wsDeleteBtn = document.getElementById('wsDelete');
   if (wsDeleteBtn) {
@@ -1357,7 +1381,7 @@ function renderAdminWorkScore() {
         'ไม่กระทบคะแนน Error/ขาดลามาสาย/ทำความดีของคนนี้เลย กู้คืนไม่ได้')) return;
       wsDeleteBtn.disabled = true;
       apiPost('deleteWorkScore', { employeeId: employeeId, month: month, year: year })
-        .then(function () { toast('ลบการประเมินแล้ว — เลือกพนักงานที่ถูกต้องแล้วประเมินใหม่ได้เลย'); loadExisting(); })
+        .then(function () { toast('ลบการประเมินแล้ว — เลือกพนักงานที่ถูกต้องแล้วประเมินใหม่ได้เลย'); loadBulkThenRender(); })
         .catch(function (e) { wsDeleteBtn.disabled = false; toast(e.message || String(e), true); });
     });
   }
