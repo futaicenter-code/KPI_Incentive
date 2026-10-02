@@ -443,9 +443,6 @@ function renderAdminPasswordGate() {
 // เป็นการจัดลำดับเมนูอย่างเดียว ไม่กระทบ Logic/การคำนวณใดๆ
 var ADMIN_TABS = [
   { key: 'dashboard', label: 'Dashboard', icon: '📊', render: renderAdminDashboard },
-  { key: 'work', label: 'บันทึกงาน', icon: '📝', render: renderAdminWork },
-  { key: 'salesfield', label: 'Sales Field', icon: '🚗', render: function () { renderAdminSalesMonthly('field'); } },
-  { key: 'salesonline', label: 'Sales Online', icon: '🛒', render: function () { renderAdminSalesMonthly('online'); } },
   { key: 'workscore', label: 'ประเมิน Work Score', icon: '🎯', render: renderAdminWorkScore },
   { key: 'error', label: 'Error', icon: '⚠️', render: renderAdminError },
   { key: 'gooddeed', label: 'Good Deed', icon: '🌟', render: renderAdminGoodDeed },
@@ -530,102 +527,6 @@ function renderAdminDashboard() {
       var retryBtn = document.getElementById('dbRetry');
       if (retryBtn) retryBtn.addEventListener('click', load);
     });
-  }
-}
-
-/* ---- 1. บันทึกงาน (Admin บันทึกแทน/ดูประวัติของใครก็ได้) ---- */
-function renderAdminWork() {
-  var html = '<div class="card"><h3>📝 บันทึกงาน</h3><div class="cardSubtitle">บันทึกงานแทนพนักงาน หรือดูประวัติของใครก็ได้</div><label>เลือกพนักงาน</label><select id="awEmp"><option value="">— เลือกชื่อ —</option>' + employeeOptions(APP.employees) + '</select></div>' +
-    '<div id="awArea"></div><div id="awHist"></div>';
-  document.getElementById('content').innerHTML = html;
-  document.getElementById('awEmp').addEventListener('change', function () {
-    var emp = APP.employees.filter(function (e) { return e.id === this.value; }, this)[0];
-    if (!emp) { document.getElementById('awArea').innerHTML = ''; document.getElementById('awHist').innerHTML = ''; return; }
-    if (emp.formType === 'daily') {
-      document.getElementById('awArea').innerHTML = dailyFormHtml('aw', emp.department);
-      wireDailyForm('aw', emp.id);
-      document.getElementById('awHist').innerHTML = '<div class="card"><h3>ประวัติล่าสุด</h3><div id="aw_hist" class="muted">กำลังโหลด...</div></div>';
-      loadDailyHistory('aw', emp.id);
-    } else if (emp.formType === 'weekly') {
-      document.getElementById('awArea').innerHTML = weeklyFormHtml('aw');
-      wireWeeklyForm('aw', emp.id, function () { loadWeeklyHistory('aw', emp.id); });
-      document.getElementById('awHist').innerHTML = '<div class="card"><h3>ประวัติล่าสุด</h3><div id="aw_whist" class="muted">กำลังโหลด...</div></div>';
-      loadWeeklyHistory('aw', emp.id);
-    } else {
-      document.getElementById('awArea').innerHTML = '<div class="card muted">แผนกนี้ใช้แบบฟอร์มรายเดือน — ไปที่เมนู Sales Field / Sales Online แทน</div>';
-      document.getElementById('awHist').innerHTML = '';
-    }
-  });
-}
-
-/* ---- 2/3. Sales Field / Sales Online (Admin กรอกให้) ---- */
-// ฟิลด์ของ Sales Field กับ Sales Online ไม่เหมือนกัน แยกฟอร์ม/คอลัมน์สรุปตาม kind ให้ตรง Schema จริง
-function renderAdminSalesMonthly(kind) {
-  var dept = kind === 'field' ? 'Sales' : 'Online';
-  var list = APP.employees.filter(function (e) { return e.department === dept; });
-  var formHtml, cols;
-  if (kind === 'field') {
-    // Work Score V2: เพิ่ม "เป้ายอดขายส่วนตัว" กรอกคู่กับยอดขายจริงทุกเดือน — ใช้คำนวณข้อ A ในหน้า "ประเมิน Work Score" ให้อัตโนมัติ
-    formHtml = '<div class="row"><div><label>ยอดขายส่วนตัว</label><input type="number" id="smPersonalSales"></div><div><label>เป้ายอดขายส่วนตัว (เดือนนี้)</label><input type="number" id="smTarget"></div></div>' +
-      '<div class="row"><div><label>จำนวนลูกค้าใหม่</label><input type="number" id="smNewCustomers"></div><div><label>จำนวนลูกค้าที่ดึงกลับ</label><input type="number" id="smWonBack"></div></div>' +
-      '<label>ยอดขายสินค้าผลักดัน</label><input type="number" id="smPush">' +
-      '<label>ยอดค้างชำระ</label><input type="number" id="smOutstanding">' +
-      '<label>หมายเหตุ</label><input type="text" id="smNote">';
-    cols = [
-      { key: 'ยอดขายส่วนตัว', label: 'ยอดขายส่วนตัว' }, { key: 'เป้ายอดขายส่วนตัว', label: 'เป้ายอดขาย' }, { key: 'จำนวนลูกค้าใหม่', label: 'ลูกค้าใหม่' },
-      { key: 'จำนวนลูกค้าที่ดึงกลับ', label: 'ลูกค้าที่ดึงกลับ' }, { key: 'ยอดขายสินค้าผลักดัน', label: 'สินค้าผลักดัน' },
-      { key: 'ยอดค้างชำระ', label: 'ค้างชำระ' }, { key: 'หมายเหตุ', label: 'หมายเหตุ' }
-    ];
-  } else {
-    formHtml = '<label>ยอดขาย</label><input type="number" id="smSales">' +
-      '<div class="row"><div><label>ลูกค้าใหม่</label><input type="number" id="smNewCustomers"></div><div><label>ลูกค้าที่ดูแล</label><input type="number" id="smManaged"></div></div>' +
-      '<label>Order</label><input type="number" id="smOrderCount">' +
-      '<label>ปัญหา/Order ผิด</label><input type="number" id="smOrderIssue">' +
-      '<label>หมายเหตุ</label><input type="text" id="smNote">';
-    cols = [
-      { key: 'ยอดขาย', label: 'ยอดขาย' }, { key: 'ลูกค้าใหม่', label: 'ลูกค้าใหม่' },
-      { key: 'ลูกค้าที่ดูแล', label: 'ลูกค้าที่ดูแล' }, { key: 'Order', label: 'Order' },
-      { key: 'ปัญหา/Order ผิด', label: 'ปัญหา/Order ผิด' }, { key: 'หมายเหตุ', label: 'หมายเหตุ' }
-    ];
-  }
-  var html =
-    '<div class="card"><h3>' + (kind === 'field' ? '🚗 Sales Field' : '🛒 Sales Online') + '</h3><div class="cardSubtitle">กรอกยอดประจำเดือน</div>' + monthPickerHtml('sm', APP.month, APP.year) +
-    '<label>พนักงาน</label><select id="smEmp">' + employeeOptions(list) + '</select>' +
-    formHtml +
-    '<button class="btn" id="smSave">✓ บันทึก</button></div>' +
-    '<div class="card"><h3>🗂️ สรุปเดือนนี้</h3><div id="smList" class="muted">กำลังโหลด...</div></div>';
-  document.getElementById('content').innerHTML = html;
-
-  document.getElementById('sm_go').addEventListener('click', load);
-  load();
-  document.getElementById('smSave').addEventListener('click', function (evt) {
-    var payload = kind === 'field' ? {
-      employeeId: document.getElementById('smEmp').value,
-      month: Number(document.getElementById('sm_m').value), year: Number(document.getElementById('sm_y').value),
-      personalSales: document.getElementById('smPersonalSales').value, personalTarget: document.getElementById('smTarget').value,
-      newCustomers: document.getElementById('smNewCustomers').value,
-      wonBackCustomers: document.getElementById('smWonBack').value, pushProductSales: document.getElementById('smPush').value,
-      outstandingAmount: document.getElementById('smOutstanding').value, note: document.getElementById('smNote').value
-    } : {
-      employeeId: document.getElementById('smEmp').value,
-      month: Number(document.getElementById('sm_m').value), year: Number(document.getElementById('sm_y').value),
-      sales: document.getElementById('smSales').value, newCustomers: document.getElementById('smNewCustomers').value,
-      managedCustomers: document.getElementById('smManaged').value, orderCount: document.getElementById('smOrderCount').value,
-      orderIssue: document.getElementById('smOrderIssue').value, note: document.getElementById('smNote').value
-    };
-    withButtonGuard(evt.target, function () { return apiPost('upsertSalesMonthly', { kind: kind, payload: payload }); })
-      .then(function () { toast('บันทึกแล้ว'); load(); }).catch(function (e) { toast(e.message || String(e), true); });
-  });
-
-  function load() {
-    var m = Number(document.getElementById('sm_m').value), y = Number(document.getElementById('sm_y').value);
-    apiGet('salesMonthlyAll', { kind: kind, month: m, year: y }).then(function (rows) {
-      var el = document.getElementById('smList');
-      if (!el) return; // สลับแท็บไปแล้วระหว่างรอโหลด — ไม่มีอะไรให้อัปเดต ไม่ต้อง toast error (เคยเจอ error "Cannot set properties of null" ตรงนี้)
-      if (!rows.length) { el.innerHTML = '<div class="muted">ยังไม่มีข้อมูลเดือนนี้</div>'; return; }
-      el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th>' + cols.map(function (c) { return '<th>' + esc(c.label) + '</th>'; }).join('') + '</tr>' +
-        rows.map(function (r) { return '<tr><td>' + esc(r['ชื่อพนักงาน']) + '</td>' + cols.map(function (c) { return '<td>' + (c.key === 'หมายเหตุ' ? esc(r[c.key]) : fmtNum(r[c.key])) + '</td>'; }).join('') + '</tr>'; }).join('') + '</table></div>';
-    }).catch(function (e) { if (document.getElementById('smList')) toast(e.message || String(e), true); });
   }
 }
 
@@ -1210,8 +1111,9 @@ function renderAdminCalendar() {
 // พนักงานแผนก Support & Strategy (Business Operations Lead) ไม่ให้เลือกในนี้ — มีระบบประเมินแยกต่างหากตามที่สั่ง
 // Work Score V2 (รวมหน้า): พี่ขอให้กรอกยอด Sales Field/Online "รวมอยู่ในหน้าเดียวกัน" กับการประเมิน Work Score เลย ไม่ต้องสลับแท็บ
 // เลือกพนักงานแผนกไหน แพทเทิร์นการกรอกก็ต่างกันไปอัตโนมัติ (เซลส์วิ่ง/เซลส์ออนไลน์ = มีการ์ดกรอกยอดเดือนนี้โผล่ขึ้นมาก่อน
-// แผนกอื่น = ไม่มีการ์ดนี้ ข้ามไปกรอกคะแนน A/B/C ตรงๆ เหมือนเดิม) — แท็บ "Sales Field"/"Sales Online" เดิมยังอยู่เหมือนเดิม
-// (มีประโยชน์ตรงที่ดูสรุปยอดของทุกคนในแผนกพร้อมกันได้ทีเดียว) หน้านี้แค่เพิ่มทางลัดกรอกทีละคนแบบไม่ต้องสลับแท็บเฉยๆ
+// แผนกอื่น = ไม่มีการ์ดนี้ ข้ามไปกรอกคะแนน A/B/C ตรงๆ เหมือนเดิม) — แท็บ "Sales Field"/"Sales Online" แยกต่างหากถูกลบออกไปแล้ว
+// ตามที่พี่ขอ (ไม่ต้องการให้กรอกข้อมูลชุดเดียวกันได้จาก 2 ที่) การ์ดนี้ในหน้า Work Score จึงเป็นจุดเดียวที่กรอกยอดขายรายเดือน
+// ของเซลส์วิ่ง/เซลส์ออนไลน์ได้แล้วทั้งระบบ (ไม่มีตารางสรุปยอดรวมทุกคนพร้อมกันอีกต่อไป ต้องเลือกดูทีละคนจากตรงนี้)
 function renderAdminWorkScore() {
   var eligible = APP.employees.filter(function (e) { return e.department !== 'Support & Strategy'; });
   var html =
@@ -1267,9 +1169,9 @@ function renderAdminWorkScore() {
   }
 
   // Work Score V2 (รวมหน้า): การ์ดกรอกยอด Sales Field/Online เดือนนี้ — โผล่ในหน้านี้เองตามแผนกของพนักงานที่เลือก
-  // ใช้ id ขึ้นต้นด้วย wsSm... แยกจาก id ในแท็บ "Sales Field"/"Sales Online" เดิม (smXxx) กันชนกัน แม้จะไม่เคยอยู่ในหน้าเดียวกันจริงก็ตาม
+  // ใช้ id ขึ้นต้นด้วย wsSm... (ของเดิมตอนยังมีแท็บแยกใช้ smXxx) เป็นจุดเดียวที่กรอกยอดขายรายเดือนได้แล้วทั้งระบบ
   function workScoreSalesFieldFormHtml() {
-    return '<div class="card"><h3>🚗 Sales Field — กรอกยอดเดือนนี้</h3><div class="cardSubtitle">กรอกแล้วกด "บันทึกยอดขาย" ระบบจะคำนวณข้อ A/B ด้านล่างให้ใหม่ทันที (ข้อมูลชุดเดียวกับแท็บ "Sales Field")</div>' +
+    return '<div class="card"><h3>🚗 Sales Field — กรอกยอดเดือนนี้</h3><div class="cardSubtitle">กรอกแล้วกด "บันทึกยอดขาย" ระบบจะคำนวณข้อ A/B ด้านล่างให้ใหม่ทันที</div>' +
       '<div class="row"><div><label>ยอดขายส่วนตัว</label><input type="number" id="wsSmPersonalSales"></div><div><label>เป้ายอดขายส่วนตัว (เดือนนี้)</label><input type="number" id="wsSmTarget"></div></div>' +
       '<div class="row"><div><label>จำนวนลูกค้าใหม่</label><input type="number" id="wsSmNewCustomers"></div><div><label>จำนวนลูกค้าที่ดึงกลับ</label><input type="number" id="wsSmWonBack"></div></div>' +
       '<label>ยอดขายสินค้าผลักดัน</label><input type="number" id="wsSmPush">' +
@@ -1278,7 +1180,7 @@ function renderAdminWorkScore() {
       '<button class="btn secondary" id="wsSmSave">✓ บันทึกยอดขาย</button></div>';
   }
   function workScoreSalesOnlineFormHtml() {
-    return '<div class="card"><h3>🛒 Sales Online — กรอกยอดเดือนนี้</h3><div class="cardSubtitle">กรอกแล้วกด "บันทึกยอดขาย" (ข้อมูลชุดเดียวกับแท็บ "Sales Online" — ยังไม่มีสูตรคำนวณคะแนนอัตโนมัติของเซลส์ออนไลน์ ให้คะแนน A/B/C ด้านล่างเองไปก่อน)</div>' +
+    return '<div class="card"><h3>🛒 Sales Online — กรอกยอดเดือนนี้</h3><div class="cardSubtitle">กรอกแล้วกด "บันทึกยอดขาย" เพื่อเก็บไว้เป็นข้อมูลรายงานยอดขายออนไลน์เฉยๆ — ยังไม่มีสูตรคำนวณคะแนนอัตโนมัติของเซลส์ออนไลน์ ให้คะแนน A/B/C ด้านล่างเองไปก่อน (ไม่มีผลต่อคะแนน/เงินพิเศษของตัวเลขชุดนี้เอง)</div>' +
       '<label>ยอดขาย</label><input type="number" id="wsSmSales">' +
       '<div class="row"><div><label>ลูกค้าใหม่</label><input type="number" id="wsSmOnlineNewCustomers"></div><div><label>ลูกค้าที่ดูแล</label><input type="number" id="wsSmManaged"></div></div>' +
       '<label>Order</label><input type="number" id="wsSmOrderCount">' +
@@ -1367,7 +1269,7 @@ function renderAdminWorkScore() {
       setValIfExists('wsA', aScore === null ? 0 : aScore);
       setValIfExists('wsB', bScore);
       box.innerHTML = (aScore === null
-        ? '⚠️ ยังไม่ได้กรอก "เป้ายอดขายส่วนตัว" เดือนนี้ในแท็บ Sales Field — ตั้งข้อ A เป็น 0 ไปก่อน ไปกรอกเป้าก่อนแล้วกลับมาหน้านี้ใหม่'
+        ? '⚠️ ยังไม่ได้กรอก "เป้ายอดขายส่วนตัว" เดือนนี้ — ตั้งข้อ A เป็น 0 ไปก่อน กรอกเป้าในการ์ด "Sales Field — กรอกยอดเดือนนี้" ด้านบนแล้วกด "บันทึกยอดขาย" อีกครั้ง ระบบจะคำนวณ A ให้ใหม่ทันที'
         : '🧮 คำนวณ Work Score ให้อัตโนมัติจากข้อมูล Sales Field เดือนนี้แล้ว (ยอดขาย ' + fmtNum(row['ยอดขายส่วนตัว']) + ' / เป้า ' + fmtNum(row['เป้ายอดขายส่วนตัว']) + ') — A/B มาจากตัวเลขจริง, C ให้เต็ม ' + COOPERATION_DEFAULT_FULL + ' อัตโนมัติ (แก้ไขเองได้ทุกข้อก่อนกดบันทึก)') ;
       updateSum();
     }).catch(function () { var box = document.getElementById('wsAutoCalc'); if (box) box.style.display = 'none'; /* ดึงไม่สำเร็จ ไม่รบกวน ให้กรอกเองตามปกติ */ });
