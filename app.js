@@ -662,6 +662,7 @@ function renderAdminError() {
     '<div class="muted" id="eReporterHint" style="display:none;"></div></div>' +
 
     '<div class="card"><h3>📋 ข้อมูลเหตุการณ์</h3>' +
+    '<div id="eEditBanner" class="calloutBox amber" style="display:none;margin-bottom:12px;">✏️ กำลังแก้ไขเหตุการณ์ <b id="eEditBannerId"></b> — บันทึกจะอัปเดตรายการเดิม ไม่สร้างรายการใหม่ <button class="btn secondary small" id="eCancelEdit" style="margin-left:8px;">ยกเลิกการแก้ไข</button></div>' +
     '<div class="row"><div><label>วันที่เกิดเหตุ</label><input type="date" id="eDate" value="' + todayStr() + '"></div>' +
     '<div><label>แผนก (อัตโนมัติจากผู้รับผิดชอบที่เลือกด้านบน)</label><input type="text" id="eDept" readonly placeholder="— เลือกผู้รับผิดชอบก่อน —"></div></div>' +
     '<label>ประเภทความผิด</label><select id="eType">' + typeOptions + '</select>' +
@@ -683,6 +684,34 @@ function renderAdminError() {
   document.getElementById('content').innerHTML = html;
   wireCardSelect('eImpact');
   wireCardSelect('eSeverity');
+
+  // สถานะโหมดแก้ไข — null = กำลังบันทึกเหตุการณ์ใหม่ (ปกติ), มีค่า = กำลังแก้ไขเหตุการณ์เดิมตามรหัสนี้ (กดปุ่ม "แก้ไข"
+  // จากรายการ "เหตุการณ์เดือนนี้" ด้านล่าง) พี่ขอให้แก้วันที่/ผู้รับผิดชอบ/ฯลฯ ของเหตุการณ์ที่กรอกผิดไปแล้วได้
+  var editingEventId = null;
+  function setEditMode(eventId) {
+    editingEventId = eventId;
+    document.getElementById('eEditBanner').style.display = eventId ? '' : 'none';
+    document.getElementById('eEditBannerId').textContent = eventId || '';
+    document.getElementById('eSave').textContent = eventId ? '✓ บันทึกการแก้ไข' : '✓ บันทึกเหตุการณ์';
+  }
+  document.getElementById('eCancelEdit').addEventListener('click', function () { resetFormToAddMode(); });
+
+  function resetFormToAddMode() {
+    setEditMode(null);
+    document.getElementById('eDate').value = todayStr();
+    document.getElementById('eType').selectedIndex = 0;
+    document.getElementById('eDesc').value = '';
+    document.getElementById('eDamage').value = '';
+    document.getElementById('eReason').value = '';
+    document.getElementById('eReporter').value = '';
+    document.getElementById('eRespRows').innerHTML = '';
+    addRespRow();
+    document.getElementById('eImpact').selectedIndex = 0;
+    if (document.getElementById('eImpact')._cardSync) document.getElementById('eImpact')._cardSync();
+    syncSeverityToImpact();
+    syncReporterHint();
+    syncDeptFromResponsible();
+  }
 
   // PHASE 1: คะแนนรางวัลผู้แจ้งเป็นค่าคงที่จาก Config เสมอ (คำนวณฝั่ง Backend ล้วนๆ) — ตรงนี้แค่โชว์ตัวเลขที่จะได้ให้ดูก่อนบันทึก ไม่ให้แก้เอง
   function syncReporterHint() {
@@ -754,6 +783,46 @@ function renderAdminError() {
   document.getElementById('eImpact').addEventListener('change', syncSeverityToImpact);
   syncSeverityToImpact();
 
+  // เปิดฟอร์มนี้ในโหมดแก้ไขเหตุการณ์เดิม (กดปุ่ม "✏️ แก้ไข" จากรายการ "เหตุการณ์เดือนนี้" ด้านล่าง) — ดึงรายละเอียด
+  // เต็มจาก Backend มาพรีฟิลทุกช่อง ตั้งค่า "ผลกระทบ"/"ระดับความรุนแรง" ตรงๆ ผ่าน ._cardSync() เท่านั้น (ไม่ dispatch
+  // 'change') กัน syncSeverityToImpact() รีเซ็ตระดับทับค่าที่เคย override ไว้ตอนบันทึกครั้งแรก
+  function startEdit(eventId) {
+    apiGet('errorEventDetail', { eventId: eventId }).then(function (d) {
+      document.getElementById('eDate').value = d.date;
+      document.getElementById('eType').value = d.errorTypeId;
+      document.getElementById('eDesc').value = d.description || '';
+      document.getElementById('eDamage').value = d.damageAmount;
+      document.getElementById('eReason').value = d.overrideReason || '';
+
+      document.getElementById('eRespRows').innerHTML = '';
+      var ids = (d.responsibleIds && d.responsibleIds.length) ? d.responsibleIds : [''];
+      ids.forEach(function (id) {
+        addRespRow();
+        var sels = document.querySelectorAll('.eRespSel');
+        sels[sels.length - 1].value = id;
+      });
+
+      document.getElementById('eReporter').value = d.reporterId || '';
+
+      var impactSel = document.getElementById('eImpact');
+      impactSel.value = d.impact;
+      if (impactSel._cardSync) impactSel._cardSync();
+      var impactInfo = APP.impactOptions.filter(function (i) { return i.key === impactSel.value; })[0];
+      document.getElementById('eImpactDesc').textContent = impactInfo ? impactInfo.desc : '';
+
+      var severitySel = document.getElementById('eSeverity');
+      severitySel.value = String(d.level);
+      if (severitySel._cardSync) severitySel._cardSync();
+      var sevInfo = APP.severityLevels.filter(function (s) { return s.level === d.level; })[0];
+      document.getElementById('eSeverityDesc').textContent = sevInfo ? sevInfo.desc : '';
+
+      syncReporterHint();
+      syncDeptFromResponsible();
+      setEditMode(eventId);
+      document.getElementById('eEditBanner').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }).catch(function (e) { toast(e.message || String(e), true); });
+  }
+
   document.getElementById('eSave').addEventListener('click', function (evt) {
     var typeSel = document.getElementById('eType');
     var impactSel = document.getElementById('eImpact');
@@ -770,11 +839,14 @@ function renderAdminError() {
       description: document.getElementById('eDesc').value, damageAmount: document.getElementById('eDamage').value, responsibleIds: responsibleIds,
       reporterId: reporterId // คะแนน/สถานะรางวัลผู้แจ้งคำนวณฝั่ง Backend ล้วนๆ จาก Config เสมอ (PHASE 1) ไม่ส่งจาก Client แล้ว
     };
-    withButtonGuard(evt.target, function () { return apiPost('submitErrorEvent', payload); })
+    var isEdit = !!editingEventId;
+    if (isEdit) payload.eventId = editingEventId;
+    withButtonGuard(evt.target, function () { return apiPost(isEdit ? 'updateErrorEvent' : 'submitErrorEvent', payload); })
       .then(function (r) {
-        var msg = 'บันทึกแล้ว ' + r.eventId + ' (' + r.pointsPerPerson + ' คะแนน/คน)';
+        var msg = (isEdit ? 'แก้ไขแล้ว ' : 'บันทึกแล้ว ') + r.eventId + ' (' + r.pointsPerPerson + ' คะแนน/คน)';
         if (r.reward) msg += ' + ให้รางวัลผู้แจ้ง ' + fmtNum(r.reward.points) + ' คะแนน (' + (r.reward.isSelfReport ? 'สารภาพเอง' : 'แจ้งจากคนอื่น') + ')';
-        toast(msg); renderAdminError();
+        toast(msg);
+        if (isEdit) { resetFormToAddMode(); loadEvents(); } else { renderAdminError(); }
       })
       .catch(function (e) { toast(e.message || String(e), true); });
   });
@@ -803,7 +875,11 @@ function renderAdminError() {
           ? '<div class="meta">ผู้แจ้ง: ' + esc(r['ชื่อผู้แจ้ง']) + ' (' + esc(r['ประเภทการแจ้ง']) + ', +' + fmtNum(r['คะแนนรางวัลผู้แจ้ง']) + ' คะแนน) ' + statusBadge(r['สถานะรางวัล']) +
             ' <select class="rwStChg" data-id="' + r['รหัสรางวัล'] + '"><option ' + (r['สถานะรางวัล'] === 'Pending' ? 'selected' : '') + '>Pending</option><option ' + (r['สถานะรางวัล'] === 'Approved' ? 'selected' : '') + '>Approved</option><option ' + (r['สถานะรางวัล'] === 'Rejected' ? 'selected' : '') + '>Rejected</option></select></div>'
           : '';
-        return '<div class="list-item"><b>' + esc(r['รหัสเหตุการณ์']) + '</b> — ' + esc(r['ชื่อประเภทความผิด']) + ' — ' + esc(r['ผลกระทบ']) + ' (ระดับ ' + r['ระดับ'] + ', ' + r['คะแนนต่อคน'] + ')<div class="meta">' + fmtDate(r['วันที่']) + ' · ' + esc(r['แผนก']) + ' · ผู้รับผิดชอบ: ' + esc(r['ผู้รับผิดชอบ']) + '</div>' + reporterHtml + '</div>';
+        // ปุ่ม "✏️ แก้ไข"/"🗑️ ลบ" ตามที่พี่ขอ — ให้แก้/ลบเหตุการณ์ย้อนหลังได้ (วันที่ผิด/ผู้รับผิดชอบผิด ฯลฯ) จากตรงนี้เลย
+        var actionsHtml = '<div class="rowActions" style="margin-top:6px;">' +
+          '<button class="btn secondary small elEdit" data-id="' + esc(r['รหัสเหตุการณ์']) + '">✏️ แก้ไข</button> ' +
+          '<button class="btn secondary small elDelete" data-id="' + esc(r['รหัสเหตุการณ์']) + '" style="color:#c0392b;border-color:#c0392b;">🗑️ ลบ</button></div>';
+        return '<div class="list-item"><b>' + esc(r['รหัสเหตุการณ์']) + '</b> — ' + esc(r['ชื่อประเภทความผิด']) + ' — ' + esc(r['ผลกระทบ']) + ' (ระดับ ' + r['ระดับ'] + ', ' + r['คะแนนต่อคน'] + ')<div class="meta">' + fmtDate(r['วันที่']) + ' · ' + esc(r['แผนก']) + ' · ผู้รับผิดชอบ: ' + esc(r['ผู้รับผิดชอบ']) + '</div>' + reporterHtml + actionsHtml + '</div>';
       }).join('');
       Array.prototype.forEach.call(el.querySelectorAll('.rwStChg'), function (sel) {
         sel.addEventListener('change', function () {
@@ -811,6 +887,23 @@ function renderAdminError() {
           apiPost('updateReportRewardStatus', { id: sel.getAttribute('data-id'), status: sel.value })
             .then(function () { sel.disabled = false; toast('อัปเดตแล้ว'); })
             .catch(function (e) { sel.disabled = false; toast(e.message || String(e), true); });
+        });
+      });
+      Array.prototype.forEach.call(el.querySelectorAll('.elEdit'), function (btn) {
+        btn.addEventListener('click', function () { startEdit(btn.getAttribute('data-id')); });
+      });
+      Array.prototype.forEach.call(el.querySelectorAll('.elDelete'), function (btn) {
+        btn.addEventListener('click', function () {
+          var eventId = btn.getAttribute('data-id');
+          if (!confirm('ยืนยันลบเหตุการณ์ ' + eventId + ' ทั้งรายการ? (ลบผู้รับผิดชอบ/ผู้แจ้งที่ผูกกันไว้ด้วย กู้คืนไม่ได้)')) return;
+          btn.disabled = true;
+          apiPost('deleteErrorEvent', { eventId: eventId })
+            .then(function () {
+              toast('ลบแล้ว ' + eventId);
+              if (editingEventId === eventId) resetFormToAddMode();
+              loadEvents();
+            })
+            .catch(function (e) { btn.disabled = false; toast(e.message || String(e), true); });
         });
       });
     }).catch(function (e) { toast(e.message || String(e), true); });
