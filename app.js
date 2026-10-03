@@ -449,6 +449,7 @@ var ADMIN_TABS = [
   { key: 'attendance', label: 'Attendance', icon: '🗓️', render: renderAdminAttendance },
   { key: 'calendar', label: 'ปฏิทินบริษัท', icon: '📅', render: renderAdminCalendar },
   { key: 'summary', label: 'สรุปคะแนน/เงิน', icon: '💰', render: renderAdminSummary },
+  { key: 'annual', label: 'สรุปรายปี', icon: '📈', render: renderAdminAnnualSummary },
   { key: 'employees', label: 'จัดการพนักงาน', icon: '👤', render: renderAdminEmployees }
 ];
 
@@ -1543,6 +1544,86 @@ function renderAdminSummary() {
   });
 }
 
+/* ---- 9.5 สรุปรายปี (งาน+ผิด+ขาดลามาสาย เฉลี่ยหลายเดือน + อายุงาน — สำหรับขึ้นเงินเดือน/โบนัสประจำปี) ---- */
+// พี่ขอ "โชว์ตัวเลขดิบเทียบทุกคน ให้พี่ตัดสินใจเอง" — ไม่มีสูตรแปลงคะแนนเฉลี่ย/อายุงานเป็น % ขึ้นเงินเดือนหรือจำนวนเงินโบนัส
+// อัตโนมัติ (หลักการเดิมของระบบทุกจุดที่เกี่ยวกับเงิน ไม่เดาสูตรให้) เลือกช่วงเดือน/ปีแบบต่อเนื่อง (จาก → ถึง) แล้วเรียก
+// action "annualSummary" ครั้งเดียว (Backend เฉลี่ย "คะแนนรวม" ของเดือนที่นับได้ให้เสร็จแล้ว ดู getAnnualSummary/computeTenure
+// ใน Code.gs) — "อายุงาน" ต้องกรอก "วันเริ่มงาน" ในชีต Employees เองก่อน (ไม่มีฟอร์มเว็บให้กรอก ระบบเดาให้ไม่ได้)
+function renderAdminAnnualSummary() {
+  var MONTHS_TH = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+  function miniYearMonthSelectHtml(idPrefix, month, year) {
+    var mOpts = '', yOpts = '';
+    for (var m = 1; m <= 12; m++) mOpts += '<option value="' + m + '"' + (m === month ? ' selected' : '') + '>' + MONTHS_TH[m] + '</option>';
+    for (var y = year - 3; y <= year + 1; y++) yOpts += '<option value="' + y + '"' + (y === year ? ' selected' : '') + '>' + y + '</option>';
+    return '<select id="' + idPrefix + '_m">' + mOpts + '</select> <select id="' + idPrefix + '_y">' + yOpts + '</select>';
+  }
+
+  var html =
+    '<div class="card"><h3>📈 สรุปรายปี</h3><div class="cardSubtitle">คะแนนรวม Performance (งาน+ผิด+ขาดลามาสาย เต็ม 100/เดือน) เฉลี่ยของเดือนที่เลือก + อายุงาน — ใช้ประกอบการตัดสินใจขึ้นเงินเดือน/ให้โบนัสประจำปีเอง ระบบไม่มีสูตรแปลงเป็น % ขึ้นเงินเดือน/บาทโบนัสอัตโนมัติ</div>' +
+    '<div class="row"><div><label>จากเดือน/ปี</label>' + miniYearMonthSelectHtml('asFrom', 1, APP.year) + '</div>' +
+    '<div><label>ถึงเดือน/ปี</label>' + miniYearMonthSelectHtml('asTo', APP.month, APP.year) + '</div></div>' +
+    '<button class="btn" id="as_go" style="margin-top:10px;">ดูสรุป</button>' +
+    '<div class="calloutBox mt0" style="margin-top:14px;">คอลัมน์ <b>คะแนนเฉลี่ย</b> = ค่าเฉลี่ย "คะแนนรวม" ของเดือนที่ <b>นับได้</b> เท่านั้น (เดือนที่ยังไม่ประเมิน Work Score เดือนนั้นเป็น PENDING จะไม่ถูกนับเข้าค่าเฉลี่ย แต่โชว์คอลัมน์ "นับได้" ให้เห็นว่านับได้กี่เดือนจากกี่เดือนที่เลือก กันเข้าใจผิดว่าข้อมูลครบแล้ว) · <b>อายุงาน</b> คำนวณ ณ วันสุดท้ายของเดือน "ถึง" ที่เลือก จากคอลัมน์ "วันเริ่มงาน" ในชีต Employees (กรอกเองทีละคนตรงในชีตเลย ไม่มีฟอร์มเว็บให้กรอก) คนที่ยังไม่กรอกจะโชว์ "ยังไม่กรอกวันเริ่มงาน" ตรงไปตรงมา · ไม่รวมเบี้ยขยัน/เงินพิเศษ/Reward Points เพราะเป็นเงินคนละก้อนกันอยู่แล้ว ดูที่หน้า "สรุปคะแนน/เงิน"/"ปฏิทินบริษัท" แทน · พนักงานลาออกแล้วที่มีข้อมูลจริงอยู่ในช่วงที่เลือกจะยังโผล่ในตารางพร้อมป้าย "ลาออกแล้ว" ให้เห็นไว้อ้างอิง</div>' +
+    '</div>' +
+    '<div class="card"><div id="asList" class="muted">กำลังโหลด...</div></div>';
+  document.getElementById('content').innerHTML = html;
+
+  var lastRows = [];
+  document.getElementById('as_go').addEventListener('click', load);
+  load();
+
+  function load() {
+    var fromMonth = Number(document.getElementById('asFrom_m').value), fromYear = Number(document.getElementById('asFrom_y').value);
+    var toMonth = Number(document.getElementById('asTo_m').value), toYear = Number(document.getElementById('asTo_y').value);
+    var el = document.getElementById('asList');
+    if (el) el.innerHTML = '<div class="muted">กำลังโหลด...</div>';
+    apiGet('annualSummary', { fromMonth: fromMonth, fromYear: fromYear, toMonth: toMonth, toYear: toYear }).then(function (rows) {
+      if (!document.getElementById('asList')) return; // สลับหน้าไปแล้วระหว่างรอโหลด
+      lastRows = rows;
+      render();
+    }).catch(function (e) {
+      var el2 = document.getElementById('asList');
+      if (!el2) return;
+      el2.innerHTML = '<div class="muted">โหลดไม่สำเร็จ: ' + esc(e.message || String(e)) + ' <button class="btn secondary" id="asRetry" style="margin-left:8px;">ลองใหม่</button></div>';
+      var retryBtn = document.getElementById('asRetry');
+      if (retryBtn) retryBtn.addEventListener('click', load);
+      toast(e.message || String(e), true);
+    });
+  }
+
+  function nameCellHtml(r) {
+    var name = esc(r.nickname) + ' (' + esc(r.fullName) + ')';
+    return (r.status && r.status !== 'Active') ? (name + ' <span class="inactiveBadge">ลาออกแล้ว</span>') : name;
+  }
+
+  // เรียงคะแนนเฉลี่ยมาก→น้อยเป็นค่าเริ่มต้นเสมอ (เหมือนหน้า "สรุปคะแนน/เงิน") — คนที่ยังนับไม่ได้เลย (avgTotalScore = null) ให้ไปอยู่ล่างสุด
+  function sortedRows() {
+    return lastRows.slice().sort(function (a, b) {
+      var av = (a.avgTotalScore === null || a.avgTotalScore === undefined) ? -1 : a.avgTotalScore;
+      var bv = (b.avgTotalScore === null || b.avgTotalScore === undefined) ? -1 : b.avgTotalScore;
+      return bv - av;
+    });
+  }
+
+  function render() {
+    var rows = sortedRows();
+    var el = document.getElementById('asList');
+    if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีข้อมูล</div>'; return; }
+    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>อายุงาน</th><th class="colDivider">คะแนนเฉลี่ย</th><th>นับได้</th></tr>' +
+      rows.map(function (r) {
+        var avgCell = (r.avgTotalScore === null || r.avgTotalScore === undefined) ? '<span class="muted">ยังนับไม่ได้เลย</span>' : fmtNum(r.avgTotalScore);
+        return '<tr' + (r.status && r.status !== 'Active' ? ' class="inactiveRow"' : '') + '>' +
+          '<td>' + nameCellHtml(r) + '</td>' +
+          '<td>' + esc(r.department) + '</td>' +
+          '<td>' + esc(r.tenureLabel) + '</td>' +
+          '<td class="colDivider totalCell">' + avgCell + '</td>' +
+          '<td>' + r.monthsCounted + ' / ' + r.monthsSelected + ' เดือน</td>' +
+          '</tr>';
+      }).join('') +
+      '</table></div>';
+  }
+}
+
 /* ---- จัดการพนักงาน (กลุ่มเงินพิเศษ + สิทธิ์เงินพิเศษ) ---- */
 // ไม่ใช่หน้า "เพิ่มพนักงานใหม่" — เพิ่มพนักงานใหม่ครั้งแรกยังต้องเพิ่มแถวในชีต Employees เอง (รหัส/ชื่อ/แผนก/ตำแหน่ง)
 // หน้านี้ใช้แก้ "กลุ่มเงินพิเศษ" (วัดผลงานด้วยสูตรกลุ่มไหน) และ "สิทธิ์เงินพิเศษ" (ได้รับเงินก้อนนี้จริงหรือยัง เช่น
@@ -1585,12 +1666,16 @@ function renderAdminEmployees() {
   function render(rows) {
     var el = document.getElementById('empMgmtList');
     if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีข้อมูลพนักงาน</div>'; return; }
-    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>สถานะ</th><th>กลุ่มเงินพิเศษ</th><th>มีสิทธิ์รับเงินพิเศษ</th><th>เริ่มมีสิทธิ์ตั้งแต่</th><th></th></tr>' +
+    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>สถานะ</th><th>วันเริ่มงาน</th><th>กลุ่มเงินพิเศษ</th><th>มีสิทธิ์รับเงินพิเศษ</th><th>เริ่มมีสิทธิ์ตั้งแต่</th><th></th></tr>' +
       rows.map(function (r) {
+        // "วันเริ่มงาน" แสดงผลอย่างเดียว (ดูอย่างเดียวในหน้านี้ ไว้ตรวจว่ากรอกครบหรือยัง) — ใช้คำนวณอายุงานในหน้า "สรุปรายปี"
+        // แก้ค่าต้องพิมพ์ตรงในชีต Employees เอง ตามที่ยืนยันแล้ว (ไม่มีฟอร์มเว็บให้แก้จุดนี้โดยเจตนา)
+        var hireDateCell = r.hireDate ? esc(fmtDate(r.hireDate)) : '<span class="muted">ยังไม่กรอก</span>';
         return '<tr data-emp-id="' + esc(r.id) + '">' +
           '<td>' + esc(r.nickname) + ' (' + esc(r.fullName) + ')</td>' +
           '<td>' + esc(r.department) + '</td>' +
           '<td>' + (r.status === 'Active' ? '<span class="badge approved">Active</span>' : '<span class="badge rejected">Inactive</span>') + '</td>' +
+          '<td>' + hireDateCell + '</td>' +
           '<td><select class="empGroupSel">' + groupOptionsHtml(r.incentiveGroup) + '</select></td>' +
           '<td style="text-align:center;"><input type="checkbox" class="empEligibleChk"' + (r.eligible ? ' checked' : '') + '></td>' +
           '<td><div style="display:flex;gap:4px;align-items:center;">' +
