@@ -91,9 +91,13 @@ function apiPost(action, payload) {
     if (!res.ok) throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ (HTTP ' + res.status + ')');
     return res.json();
   }).then(function (json) {
-    if (!json || json.success !== true) throw new Error((json && json.error) || 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์');
+    if (!json || json.success !== true) {
+      var serverErr = new Error((json && json.error) || 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์');
+      serverErr.serverReported = true; // เซิร์ฟเวอร์ตอบกลับเองว่าทำไม่สำเร็จ (ต่างจากเน็ตหลุด/หมดเวลา ที่ไม่รู้ว่าฝั่งเซิร์ฟเวอร์ทำไปแล้วหรือยัง)
+      throw serverErr;
+    }
     return json.data;
-  }).catch(function (e) { throw new Error(friendlyErrorMessage(e)); });
+  }).catch(function (e) { var wrapped = new Error(friendlyErrorMessage(e)); wrapped.serverReported = !!(e && e.serverReported); throw wrapped; });
 }
 
 // ห่อปุ่มบันทึกไว้กันกดซ้ำระหว่างรอผล (ชั้นป้องกันที่ 1 — ชั้นที่ 2 คือ requestId ฝั่ง Backend)
@@ -869,126 +873,341 @@ function renderAdminGoodDeed() {
 // ผนวกเข้ากับฟอร์ม "บันทึกเหตุการณ์ความผิด" แล้ว (ดู renderAdminError ด้านบน — ช่อง "ผู้แจ้งปัญหา")
 // ไม่มีแท็บ/ฟอร์มแยกอีกต่อไป เพราะทุกการแจ้งเป็นเรื่องเดียวกับเหตุการณ์ความผิดเสมอ
 
-/* ---- 7. Attendance ---- */
-// บันทึกเฉพาะวันที่ผิดปกติ (ขาด/ลา/มาสาย) เท่านั้น — ไม่มีแถวของวันนั้นถือว่ามาปกติ ไม่ต้องกรอกทุกวัน
-// UI/UX Redesign: ป้ายผลคะแนนต่อสถานะด้านล่างเป็น "ค่าคงที่แสดงผลอย่างเดียว" อิงตามค่าเริ่มต้นใน Config
-// (Cfg_AbsentDeduct=-5, Cfg_LeaveApprovedDeduct=0, Cfg_LeaveUnapprovedDeduct=-3, Cfg_LateDeduct=-1, Cfg_AttendancePerfectBonus=+5)
-// ไม่ได้ดึงจาก Config สดๆ — ถ้าพี่ปรับตัวเลขพวกนี้ใน Config ทีหลัง ป้ายตรงนี้ควรแก้ตามด้วย ไม่มีผลต่อการคำนวณคะแนนจริงเลย (คำนวณฝั่ง Backend ล้วนๆ เหมือนเดิม)
-var ATTENDANCE_EFFECT_LABELS = { 'ขาด': '-5', 'ลาอนุมัติ': '0', 'ลาไม่อนุมัติ': '-3', 'มาสาย': '-1' };
+/* ---- 7. Attendance (ตารางกรอกสรุปรายเดือนของทุกคน) ---- */
+// เดิมเป็นฟอร์มกรอกทีละวันทีละรายการ — เปลี่ยนเป็นตารางเดียวแบบไฟล์ Excel "สรุปการขาด ลา มาสาย" กรอกสรุปท้ายเดือนของทุกคนในหน้าเดียว
+// (ลาป่วย-มีใบ/ไม่มีใบ/ลากิจ/ลาพักร้อน รวมวันลา มาสาย(ครั้ง) มาสายรวม(นาที) OT หมายเหตุ + ลาไม่อนุมัติ/ขาด ต่อท้ายตาราง)
+// บันทึกลงชีต Attendance_Monthly ผ่าน action saveAttendanceMonthly (ส่งเฉพาะแถวที่แก้) — ลา 4 ประเภทนับเป็น "ลาอนุมัติ" ในคะแนน 20 คะแนน
+// เดิม ส่วน "ลาไม่อนุมัติ"/"ขาด" มีช่องแยก ใช้อัตราหักตาม Config เหมือนเดิมทุกประการ และเดือนไหนคนไหนมีแถวรายเดือน ระบบใช้ตัวเลขนี้แทน
+// รายการรายวันเดิมของคนนั้นเดือนนั้น (ไม่นับซ้ำ) — เดือนที่ไม่ได้กรอกตารางจะใช้รายการรายวันเดิมตามปกติ
 function renderAdminAttendance() {
-  var statusOptions = APP.attendanceStatuses.map(function (s) {
-    var lbl = ATTENDANCE_EFFECT_LABELS[s];
-    return '<option value="' + s + '">' + esc(s) + (lbl ? ' (' + lbl + ')' : '') + '</option>';
-  }).join('');
-  var leaveTypeOptions = '<option value="">ไม่ระบุ (ไม่หักเบี้ยขยัน)</option>' + APP.leaveTypes.map(function (t) {
-    return '<option value="' + esc(t) + '">' + esc(t) + '</option>';
-  }).join('');
+  var COLS = [
+    { key: 'sickCert', label: 'ลาป่วย<br>มีใบ', unit: '(วัน)', kind: 'num' },
+    { key: 'sickNoCert', label: 'ลาป่วย<br>ไม่มีใบ', unit: '(วัน)', kind: 'num' },
+    { key: 'personal', label: 'ลากิจ', unit: '(วัน)', kind: 'num' },
+    { key: 'vacation', label: 'ลาพักร้อน', unit: '(วัน)', kind: 'num' },
+    { key: '_leaveTotal', label: 'รวมวันลา', unit: '(วัน)', kind: 'calc' },
+    { key: 'lateCount', label: 'มาสาย', unit: '(ครั้ง)', kind: 'num' },
+    { key: 'lateMinutes', label: 'มาสายรวม', unit: '(นาที)', kind: 'num' },
+    { key: 'ot', label: 'OT', unit: '(ชม.)', kind: 'num' },
+    { key: 'note', label: 'หมายเหตุ', unit: '', kind: 'text' },
+    { key: 'unapproved', label: 'ลาไม่<br>อนุมัติ', unit: '(วัน)', kind: 'num', divider: true },
+    { key: 'absent', label: 'ขาด', unit: '(วัน)', kind: 'num' }
+  ];
+  var LEAVE_KEYS = ['sickCert', 'sickNoCert', 'personal', 'vacation'];
+  var DAY_KEYS = LEAVE_KEYS.concat(['unapproved', 'absent']);
+  var NUM_RE = /^(\d+(\.\d*)?|\.\d+)$/; // ตัวเลขธรรมดา ไม่รับจุลภาค/เครื่องหมายลบ (ช่องว่าง = ไม่กรอก)
+
+  var MONTHS_TH = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+  var state = { month: APP.month, year: APP.year, showInactive: false, rows: [], dirty: {}, seq: 0, saving: false };
+  var trByEmp = {};
+  var rowMeta = {};   // ข้อมูลตั้งต้นของแต่ละแถวที่โหลดมา (hasRow/dailyCount) ใช้ทำคำเตือนสด
+  var gridEl = null;  // กรอบตารางของการ render "รอบนี้" — ผลโหลดเก่าจากรอบ render ก่อนหน้า (สลับแท็บไปมา) เจอกรอบคนละตัวก็ทิ้งทันที
+  function isAlive() { return !!gridEl && document.getElementById('atGrid') === gridEl; }
+
   var html =
-    '<div class="card"><h3>🗓️ Attendance</h3><div class="cardSubtitle">บันทึกเฉพาะวันที่ผิดปกติ (ขาด/ลา/มาสาย) — วันไหนไม่มีแถวถือว่ามาปกติ ไม่ต้องกรอกทุกวัน</div>' +
-    '<div id="atMonthStats" class="statGrid mt0">กำลังโหลด...</div></div>' +
-
-    '<div class="card"><h3>📋 บันทึกรายการใหม่</h3>' +
-    '<div class="row"><div><label>พนักงาน</label><select id="atEmp">' + employeeOptions(APP.employees) + '</select></div>' +
-    '<div><label>วันที่</label><input type="date" id="atDate" value="' + todayStr() + '"></div></div>' +
-    '<label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="checkbox" id="atShowInactive" style="width:auto;"> แสดงพนักงานที่ลาออกแล้วด้วย (สำหรับลงย้อนหลัง เช่น ลืมบันทึกก่อนติ๊ก Inactive)</label>' +
-    '<label>สถานะ</label><select id="atStatus">' + statusOptions + '</select>' +
-    '<div id="atLateMinutesWrap" style="display:none;"><label>นาทีที่มาสาย</label><input type="number" id="atLateMinutes" min="0" max="600" step="1" placeholder="ไม่บังคับ — ใช้คำนวณเบี้ยขยันเท่านั้น"></div>' +
-    '<div id="atLeaveTypeWrap" style="display:none;"><label>ประเภทการลา (ใช้คำนวณเบี้ยขยัน)</label><select id="atLeaveType">' + leaveTypeOptions + '</select></div>' +
-    '<label>หมายเหตุ</label><input type="text" id="atNote" placeholder="ไม่บังคับ">' +
-    '<button class="btn" id="atSave">✓ บันทึก</button></div>' +
-
-    '<div class="card"><h3>🗂️ ประวัติเดือนนี้</h3>' + monthPickerHtml('at', APP.month, APP.year) + '<div id="atList" class="muted timeline">กำลังโหลด...</div></div>';
+    '<div class="card"><h3>🗓️ Attendance</h3><div class="cardSubtitle">กรอกสรุปขาด/ลา/มาสายของ "ทุกคน" ทั้งเดือนในตารางเดียว (เหมือนไฟล์ Excel สรุปท้ายเดือน) — ช่องที่เว้นว่างถือว่าไม่มี ไม่ต้องพิมพ์ 0</div>' +
+    monthPickerHtml('at', state.month, state.year) +
+    '<label style="display:flex;align-items:center;gap:6px;font-weight:400;margin-top:10px;"><input type="checkbox" id="atShowInactive" style="width:auto;"> แสดงพนักงานที่ลาออกแล้วด้วย (สำหรับลงย้อนหลัง)</label>' +
+    '<div class="calloutBox" style="margin-top:12px;">' +
+    '<b>วิธีคิดคะแนน:</b> ลา 4 ประเภท (ป่วย-มีใบ/ป่วย-ไม่มีใบ/ลากิจ/ลาพักร้อน) รวมกันนับเป็น "ลาอนุมัติ" · ช่อง "ลาไม่อนุมัติ" และ "ขาด" นับแยก — หักคะแนนตามอัตราใน Config เหมือนเดิม · หน่วยเป็น <b>วัน</b> ครึ่งวันพิมพ์ 0.5<br>' +
+    '<b>เบี้ยขยัน:</b> ดูจาก "มาสายรวม (นาที)" และช่องลา 4 ประเภทที่มีวัน > 0 (ลาไม่อนุมัติ/ขาด/OT ไม่กระทบเบี้ยขยัน) · <b>OT</b> เก็บไว้ดูเฉยๆ ไม่มีผลต่อคะแนนหรือเงิน<br>' +
+    '<b>สำคัญ:</b> คนไหนมีข้อมูลในตารางเดือนนี้ ระบบใช้ตัวเลขในตารางนี้ <b>แทน</b> รายการรายวันเดิมของคนนั้นทั้งหมด (ไม่นับรวมกัน) · พิมพ์ 0 = กรอกแล้วว่าไม่มี · ลบทุกช่องของแถว (รวมหมายเหตุ) แล้วบันทึก = ล้างข้อมูลรายเดือนของคนนั้น กลับไปใช้รายการรายวันเดิม (ถ้ามี) · ถ้ากรอกนาทีสายแต่ลืมใส่จำนวนครั้ง ระบบนับเป็นสาย 1 ครั้งให้</div></div>' +
+    '<div class="card"><div id="atError" class="calloutBox amber" style="display:none;margin-bottom:12px;"></div><div id="atGrid" class="muted">กำลังโหลด...</div></div>';
   document.getElementById('content').innerHTML = html;
 
-  function syncConditionalFields() {
-    var status = document.getElementById('atStatus').value;
-    document.getElementById('atLateMinutesWrap').style.display = (status === 'มาสาย') ? '' : 'none';
-    document.getElementById('atLeaveTypeWrap').style.display = (status === 'ลาอนุมัติ' || status === 'ลาไม่อนุมัติ') ? '' : 'none';
-  }
-  document.getElementById('atStatus').addEventListener('change', syncConditionalFields);
-  syncConditionalFields();
+  gridEl = document.getElementById('atGrid');
+  var chk = document.getElementById('atShowInactive');
+  document.getElementById('at_go').addEventListener('click', function () { requestLoad(); });
+  chk.addEventListener('change', function () { requestLoad(); });
+  loadTable();
 
-  // ปุ่ม "แสดงพนักงานที่ลาออกแล้วด้วย" — ค่าเริ่มต้นปิดไว้เสมอ (ดรอปดาวน์ยังเป็นเฉพาะคน Active เหมือนเดิม ใช้งานประจำวันไม่ยุ่งยาก)
-  // พอติ๊กเปิดถึงจะดึงรายชื่อทุกคน (รวม Inactive) มาจาก action "employeesForManagement" (เดียวกับหน้า "จัดการพนักงาน")
-  // มาแทนที่ตัวเลือกทั้งหมด — ใช้สำหรับลงบันทึกย้อนหลังกรณีลืมบันทึกก่อนจะติ๊ก Inactive ให้พนักงานที่ลาออกไปแล้ว (บันทึกได้
-  // ปกติทุกประการ เพราะ addAttendanceLog ฝั่ง Backend ไม่ได้เช็คสถานะ Active เลยอยู่แล้ว) ดึงมาครั้งเดียวแล้วแคชไว้ ไม่ต้อง
-  // ยิงซ้ำทุกครั้งที่ติ๊ก/ถอดติ๊กสลับไปมา
-  var allEmployeesCache = null;
-  document.getElementById('atShowInactive').addEventListener('change', function (evt) {
-    var atEmp = document.getElementById('atEmp');
-    var prevSelected = atEmp.value;
-    if (!evt.target.checked) {
-      atEmp.innerHTML = employeeOptions(APP.employees);
-      if (APP.employees.some(function (e) { return e.id === prevSelected; })) atEmp.value = prevSelected;
+  /* ---------- ข้อความ error บนหน้า (toast หายเร็วเกินไปสำหรับข้อความยาว) ---------- */
+  function showError(msg) {
+    var box = isAlive() ? document.getElementById('atError') : null;
+    if (!box) return;
+    if (!msg) { box.style.display = 'none'; box.textContent = ''; return; }
+    box.textContent = msg; box.style.display = '';
+  }
+
+  /* ---------- โหลด/เปลี่ยนเดือน ---------- */
+  function dirtyCount() { return Object.keys(state.dirty).length; }
+
+  // เปลี่ยนเดือน/ปี หรือสลับ "แสดงที่ลาออกแล้ว" = โหลดตารางใหม่ ซึ่งทิ้งสิ่งที่แก้ค้างอยู่ — ถามก่อนเสมอ ถ้ายกเลิกให้คืนค่า dropdown/ติ๊กเดิม
+  function requestLoad() {
+    if (state.saving || !isAlive()) return;
+    var mSel = document.getElementById('at_m'), ySel = document.getElementById('at_y');
+    if (dirtyCount() && !confirm('มีข้อมูลที่แก้ไขแล้วแต่ยังไม่ได้บันทึก ' + dirtyCount() + ' แถว — ถ้าโหลดใหม่ตอนนี้ ข้อมูลที่แก้จะหายไป ต้องการโหลดต่อไหม?')) {
+      mSel.value = state.month; ySel.value = state.year; chk.checked = state.showInactive;
       return;
     }
-    if (allEmployeesCache) {
-      atEmp.innerHTML = employeeOptions(allEmployeesCache);
-      atEmp.value = prevSelected;
-      return;
-    }
-    atEmp.innerHTML = '<option>กำลังโหลด...</option>';
-    apiGet('employeesForManagement', {}).then(function (rows) {
-      allEmployeesCache = rows.map(function (r) {
-        return { id: r.id, name: r.nickname + ' (' + r.fullName + ')' + (r.status !== 'Active' ? ' — ลาออกแล้ว' : '') };
-      });
-      atEmp.innerHTML = employeeOptions(allEmployeesCache);
-      atEmp.value = prevSelected;
+    state.month = Number(mSel.value); state.year = Number(ySel.value); state.showInactive = chk.checked;
+    return loadTable();
+  }
+
+  function loadTable() {
+    if (!isAlive()) return Promise.resolve();
+    var seq = ++state.seq;
+    showError('');
+    gridEl.className = 'muted';
+    gridEl.innerHTML = '<div class="muted">กำลังโหลด...</div>';
+    return apiGet('attendanceMonthlyForMonth', { month: state.month, year: state.year, includeInactive: state.showInactive ? 'true' : '' }).then(function (data) {
+      if (seq !== state.seq || !isAlive()) return; // โหลดซ้อน หรือสลับหน้า/แท็บไปแล้ว (ตารางรอบใหม่คนละกรอบกัน) — ทิ้งผลเก่า ไม่ไปเขียนทับของใหม่
+      state.rows = data.rows || [];
+      state.dirty = {};
+      renderTable();
     }).catch(function (e) {
+      if (seq !== state.seq || !isAlive()) return;
+      gridEl.innerHTML = '<div class="muted">โหลดไม่สำเร็จ: ' + esc(e.message || String(e)) + ' <button class="btn secondary" id="atRetry" style="margin-left:8px;">ลองใหม่</button></div>';
+      var retry = document.getElementById('atRetry');
+      if (retry) retry.addEventListener('click', function () { loadTable(); });
       toast(e.message || String(e), true);
-      evt.target.checked = false;
-      atEmp.innerHTML = employeeOptions(APP.employees);
     });
-  });
-
-  document.getElementById('atSave').addEventListener('click', function (evt) {
-    var status = document.getElementById('atStatus').value;
-    var payload = {
-      employeeId: document.getElementById('atEmp').value,
-      date: document.getElementById('atDate').value,
-      status: status,
-      note: document.getElementById('atNote').value,
-      lateMinutes: (status === 'มาสาย') ? document.getElementById('atLateMinutes').value : '',
-      leaveType: (status === 'ลาอนุมัติ' || status === 'ลาไม่อนุมัติ') ? document.getElementById('atLeaveType').value : ''
-    };
-    withButtonGuard(evt.target, function () { return apiPost('addAttendanceLog', payload); })
-      .then(function () {
-        toast('บันทึกแล้ว'); document.getElementById('atNote').value = '';
-        document.getElementById('atLateMinutes').value = ''; document.getElementById('atLeaveType').value = '';
-        loadList();
-      })
-      .catch(function (e) { toast(e.message || String(e), true); });
-  });
-
-  function renderMonthStats(rows) {
-    var counts = { 'ขาด': 0, 'ลาอนุมัติ': 0, 'ลาไม่อนุมัติ': 0, 'มาสาย': 0 };
-    rows.forEach(function (r) { if (counts.hasOwnProperty(r['สถานะ'])) counts[r['สถานะ']]++; });
-    var area = document.getElementById('atMonthStats');
-    area.innerHTML =
-      '<div class="statCard accentAmber"><span class="statIcon">🚫</span><div class="statLabel">ขาด</div><div class="statValue">' + counts['ขาด'] + '</div></div>' +
-      '<div class="statCard"><span class="statIcon">📄</span><div class="statLabel">ลาอนุมัติ</div><div class="statValue">' + counts['ลาอนุมัติ'] + '</div></div>' +
-      '<div class="statCard accentAmber"><span class="statIcon">⚠️</span><div class="statLabel">ลาไม่อนุมัติ</div><div class="statValue">' + counts['ลาไม่อนุมัติ'] + '</div></div>' +
-      '<div class="statCard accentBlue"><span class="statIcon">⏰</span><div class="statLabel">มาสาย</div><div class="statValue">' + counts['มาสาย'] + '</div></div>';
   }
 
-  document.getElementById('at_go').addEventListener('click', loadList);
-  loadList();
-  function loadList() {
-    apiGet('attendanceLogForMonth', { month: Number(document.getElementById('at_m').value), year: Number(document.getElementById('at_y').value) }).then(function (rows) {
-      renderMonthStats(rows);
-      var el = document.getElementById('atList');
-      if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีบันทึกผิดปกติในเดือนนี้ (ถือว่าทุกคนมาปกติ)</div>'; return; }
-      el.innerHTML = rows.map(function (r) {
-        var lbl = ATTENDANCE_EFFECT_LABELS[r['สถานะ']];
-        var extra = '';
-        if (r['สถานะ'] === 'มาสาย' && r['นาทีที่มาสาย'] !== '' && r['นาทีที่มาสาย'] !== undefined && r['นาทีที่มาสาย'] !== null) {
-          extra = ' · สาย ' + esc(r['นาทีที่มาสาย']) + ' นาที';
-        } else if ((r['สถานะ'] === 'ลาอนุมัติ' || r['สถานะ'] === 'ลาไม่อนุมัติ') && r['ประเภทการลา']) {
-          extra = ' · ' + esc(r['ประเภทการลา']);
-        }
-        return '<div class="list-item"><b>' + esc(r['ชื่อพนักงาน']) + '</b> — ' + esc(r['สถานะ']) + (lbl ? ' <span class="muted">(' + lbl + ')</span>' : '') + extra + '<div class="meta">' + fmtDate(r['วันที่']) + (r['หมายเหตุ'] ? ' · ' + esc(r['หมายเหตุ']) : '') + '</div></div>';
-      }).join('');
-    }).catch(function (e) { toast(e.message || String(e), true); });
+  /* ---------- วาดตาราง ---------- */
+  function cellHtml(r, c) {
+    if (c.kind === 'calc') return '<td class="atCalc atLeaveTotal" style="text-align:center;font-weight:600;"></td>';
+    var v = r[c.key];
+    v = (v === '' || v === null || v === undefined) ? '' : v;
+    var attrs = c.kind === 'text' ? 'type="text" maxlength="500" class="atIn atNote"' : 'type="text" inputmode="decimal" autocomplete="off" class="atIn"';
+    var sizing = c.kind === 'text' ? 'width:170px;' : 'width:64px;text-align:center;';
+    return '<td' + (c.divider ? ' class="colDivider"' : '') + '><input ' + attrs + ' style="' + sizing + 'padding:6px 4px;box-sizing:border-box;" data-emp="' + esc(r.employeeId) + '" data-key="' + c.key + '" value="' + esc(v) + '"></td>';
+  }
+
+  function nameCellHtml(r) {
+    var inactive = r.status && r.status !== 'Active';
+    var hint = '';
+    if (r.dailyCount > 0) {
+      hint = r.hasRow
+        ? '<div style="font-size:11px;color:#b45309;">มีรายวันเดิม ' + r.dailyCount + ' รายการ (ไม่นับ — ใช้ตารางนี้แทน)</div>'
+        : '<div style="font-size:11px;color:#b45309;">มีรายวันเดิม ' + r.dailyCount + ' รายการ (ยังใช้ค่ารายวันอยู่ จนกว่าจะกรอกตาราง)</div>';
+    }
+    return '<td class="atName" style="min-width:120px;">' +
+      '<div><b>' + esc(r.nickname || r.employeeId) + '</b>' + (inactive ? ' <span class="inactiveBadge">ลาออกแล้ว</span>' : '') + ' <span class="atDirty" style="display:none;color:#d97706;font-size:11px;">● แก้ไข</span></div>' +
+      '<div class="muted" style="font-size:11px;">' + esc(r.department || '') + '</div>' + hint +
+      '<div class="atWarn" style="font-size:11px;color:#b45309;"></div></td>';
+  }
+
+  function renderTable() {
+    var area = gridEl;
+    if (!isAlive()) return;
+    if (!state.rows.length) { area.innerHTML = '<div class="muted">ไม่มีพนักงานให้กรอกในเดือนนี้</div>'; return; }
+
+    var head = '<tr><th class="atName" style="text-align:left;">ชื่อ</th>' + COLS.map(function (c) {
+      return '<th' + (c.divider ? ' class="colDivider"' : '') + ' style="text-align:center;white-space:nowrap;line-height:1.25;">' + c.label + (c.unit ? '<div class="muted" style="font-weight:400;font-size:11px;">' + c.unit + '</div>' : '') + '</th>';
+    }).join('') + '</tr>';
+
+    var body = state.rows.map(function (r) {
+      return '<tr class="atRow' + ((r.status && r.status !== 'Active') ? ' inactiveRow' : '') + '" data-emp="' + esc(r.employeeId) + '">' + nameCellHtml(r) + COLS.map(function (c) { return cellHtml(r, c); }).join('') + '</tr>';
+    }).join('');
+
+    var foot = '<tr class="atTotals"><td class="atName" style="font-weight:700;">รวมทั้งหมด</td>' + COLS.map(function (c) {
+      return '<td' + (c.divider ? ' class="colDivider"' : '') + ' style="text-align:center;font-weight:700;" data-total="' + c.key + '"></td>';
+    }).join('') + '</tr>';
+
+    var saveBar = function (id) {
+      return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:' + (id === 'atSave' ? '0 0 12px' : '14px 0 0') + ';"><button class="btn" id="' + id + '">✓ บันทึกทั้งตาราง</button><span class="muted atSaveHint" style="font-size:13px;"></span></div>';
+    };
+
+    rowMeta = {};
+    state.rows.forEach(function (r) { rowMeta[r.employeeId] = r; });
+    area.className = '';
+    area.innerHTML = '<div id="atLoadedLabel" style="font-weight:600;margin-bottom:10px;">📅 กำลังกรอกข้อมูลเดือน ' + MONTHS_TH[state.month] + ' ' + state.year + (state.showInactive ? ' <span class="muted" style="font-weight:400;">(รวมพนักงานที่ลาออกแล้ว)</span>' : '') + '</div>' + saveBar('atSave') +
+      '<div style="overflow-x:auto;"><table class="simple" id="atTable">' + head + body + foot + '</table></div>' +
+      saveBar('atSave2');
+
+    // ให้คอลัมน์ชื่อตรึงซ้ายเวลาเลื่อนดูคอลัมน์อื่น (มือถือ) — ใช้สีพื้นเดียวกับการ์ดที่ครอบอยู่ ไม่เดาสีเอง ปรับตามธีมอัตโนมัติ
+    var bg = '#fff';
+    try {
+      var cardEl = area.closest('.card');
+      var cs = cardEl ? window.getComputedStyle(cardEl).backgroundColor : '';
+      if (cs && cs !== 'transparent' && cs !== 'rgba(0, 0, 0, 0)') bg = cs;
+    } catch (e) { /* ใช้สีขาวไปก่อน */ }
+    Array.prototype.forEach.call(area.querySelectorAll('.atName'), function (el) {
+      el.style.position = 'sticky'; el.style.left = '0'; el.style.zIndex = '1'; el.style.background = bg; el.style.boxShadow = '1px 0 0 rgba(0,0,0,.08)';
+    });
+
+    trByEmp = {};
+    Array.prototype.forEach.call(area.querySelectorAll('tr.atRow'), function (tr) { trByEmp[tr.getAttribute('data-emp')] = tr; });
+    Object.keys(trByEmp).forEach(function (id) { refreshRow(id); });
+    refreshTotals();
+    updateSaveHint();
+
+    var table = document.getElementById('atTable');
+    table.addEventListener('input', onInput);
+    table.addEventListener('keydown', onKeyDown);
+    table.addEventListener('focusin', function (ev) { if (ev.target && ev.target.classList && ev.target.classList.contains('atIn') && ev.target.type === 'text') { try { ev.target.select(); } catch (e) { /* ไม่เป็นไร */ } } });
+    document.getElementById('atSave').addEventListener('click', onSave);
+    document.getElementById('atSave2').addEventListener('click', onSave);
+  }
+
+  /* ---------- อ่านค่า/คำนวณสดในตาราง ---------- */
+  function parseCell(str) {
+    var s = String(str === undefined || str === null ? '' : str).trim();
+    if (s === '') return { ok: true, blank: true, n: 0 };
+    if (!NUM_RE.test(s)) return { ok: false, blank: false, n: 0 };
+    return { ok: true, blank: false, n: Number(s) };
+  }
+
+  function inputsOf(tr) { return tr.querySelectorAll('input.atIn'); }
+  function inputOf(tr, key) { return tr.querySelector('input[data-key="' + key + '"]'); }
+
+  // อัปเดตผลรวมวันลาของแถว + ไฮไลต์ช่องที่ไม่ใช่ตัวเลข + คำเตือนใต้ชื่อ
+  function refreshRow(empId) {
+    var tr = trByEmp[empId];
+    if (!tr) return;
+    var leaveTotal = 0, dayTotal = 0, anyBad = false;
+    Array.prototype.forEach.call(inputsOf(tr), function (inp) {
+      if (inp.getAttribute('data-key') === 'note') return;
+      var p = parseCell(inp.value);
+      inp.style.borderColor = p.ok ? '' : '#dc2626';
+      inp.style.background = p.ok ? '' : '#fef2f2';
+      inp.classList.toggle('atBad', !p.ok);
+      if (!p.ok) anyBad = true;
+    });
+    LEAVE_KEYS.forEach(function (k) { leaveTotal += parseCell(inputOf(tr, k).value).n; });
+    DAY_KEYS.forEach(function (k) { dayTotal += parseCell(inputOf(tr, k).value).n; });
+    var totalCell = tr.querySelector('.atLeaveTotal');
+    if (totalCell) totalCell.textContent = leaveTotal > 0 ? fmtNum(leaveTotal) : '';
+
+    var warn = '';
+    var lateCount = parseCell(inputOf(tr, 'lateCount').value), lateMin = parseCell(inputOf(tr, 'lateMinutes').value);
+    if (anyBad) warn = '⚠ มีช่องที่ไม่ใช่ตัวเลข (ขอบแดง)';
+    else if (dayTotal > 31) warn = '⚠ รวมวันลา/ขาดเกิน 31 วัน';
+    else if (lateMin.n > 0 && lateCount.n === 0) warn = '⚠ มีนาทีสายแต่ไม่ได้ใส่จำนวนครั้ง — ระบบนับเป็นสาย 1 ครั้ง';
+    else {
+      // คนที่ยังไม่เคยมีแถวรายเดือนแต่มีรายการรายวันเดิม — พอเริ่มกรอก ตัวเลขในตารางจะ "แทน" รายวันทั้งหมด (ช่องที่เว้นว่างนับเป็น 0) เตือนไว้ก่อนกดบันทึก
+      var meta = rowMeta[empId];
+      if (state.dirty[empId] && meta && !meta.hasRow && meta.dailyCount > 0) {
+        var anyFilled = false;
+        Array.prototype.forEach.call(inputsOf(tr), function (inp) { if (String(inp.value).trim() !== '') anyFilled = true; });
+        if (anyFilled) warn = 'ℹ️ บันทึกแล้วจะใช้ตัวเลขในแถวนี้แทนรายวันเดิม ' + meta.dailyCount + ' รายการ (ช่องว่าง = 0)';
+      }
+    }
+    var warnEl = tr.querySelector('.atWarn');
+    if (warnEl) warnEl.textContent = warn;
+
+    var dirty = !!state.dirty[empId];
+    var dirtyEl = tr.querySelector('.atDirty');
+    if (dirtyEl) dirtyEl.style.display = dirty ? '' : 'none';
+  }
+
+  function refreshTotals() {
+    var sums = {};
+    COLS.forEach(function (c) { sums[c.key] = 0; });
+    Object.keys(trByEmp).forEach(function (id) {
+      var tr = trByEmp[id], leave = 0;
+      COLS.forEach(function (c) {
+        if (c.kind !== 'num') return;
+        var n = parseCell(inputOf(tr, c.key).value).n;
+        sums[c.key] += n;
+        if (LEAVE_KEYS.indexOf(c.key) !== -1) leave += n;
+      });
+      sums._leaveTotal += leave;
+    });
+    COLS.forEach(function (c) {
+      if (c.kind === 'text') return;
+      var cell = document.querySelector('#atTable [data-total="' + c.key + '"]');
+      if (cell) cell.textContent = sums[c.key] > 0 ? fmtNum(sums[c.key]) : '-';
+    });
+  }
+
+  function updateSaveHint() {
+    var n = dirtyCount();
+    Array.prototype.forEach.call(document.querySelectorAll('.atSaveHint'), function (el) {
+      el.textContent = n ? ('แก้ไขแล้ว ' + n + ' แถว — ยังไม่ได้บันทึก') : 'ยังไม่มีการแก้ไข';
+      el.style.color = n ? '#d97706' : '';
+    });
+  }
+
+  function onInput(ev) {
+    var inp = ev.target;
+    if (!inp || !inp.classList || !inp.classList.contains('atIn')) return;
+    var empId = inp.getAttribute('data-emp');
+    state.dirty[empId] = true;
+    showError('');
+    refreshRow(empId); refreshTotals(); updateSaveHint();
+  }
+
+  // Enter / ลูกศรขึ้น-ลง = ไปช่องเดิมของแถวถัดไป/ก่อนหน้า (กรอกแนวตั้งเร็วเหมือนใน Excel)
+  function onKeyDown(ev) {
+    var inp = ev.target;
+    if (!inp || !inp.classList || !inp.classList.contains('atIn')) return;
+    var dir = 0;
+    if (ev.key === 'Enter' || ev.key === 'ArrowDown') dir = 1;
+    else if (ev.key === 'ArrowUp') dir = -1;
+    if (!dir) return;
+    var trs = Array.prototype.slice.call(document.querySelectorAll('#atTable tr.atRow'));
+    var idx = trs.indexOf(inp.closest('tr'));
+    var next = trs[idx + dir];
+    if (!next) return;
+    ev.preventDefault();
+    var target = inputOf(next, inp.getAttribute('data-key'));
+    if (target) target.focus();
+  }
+
+  /* ---------- บันทึก ---------- */
+  function readRowPayload(empId) {
+    var tr = trByEmp[empId];
+    var o = { employeeId: empId };
+    COLS.forEach(function (c) { if (c.kind !== 'calc') o[c.key] = inputOf(tr, c.key).value; });
+    return o;
+  }
+
+  // ล็อกทั้งตารางระหว่างรอผลบันทึก — กันพิมพ์เพิ่ม/กดปุ่มอื่นระหว่างนั้น (ไม่งั้นสิ่งที่พิมพ์ระหว่างรอจะถูกโหลดทับหายตอนบันทึกเสร็จ)
+  function setBusy(b) {
+    state.saving = b;
+    if (!isAlive()) return;
+    Array.prototype.forEach.call(document.querySelectorAll('#atGrid input, #atGrid button, #at_m, #at_y, #at_go, #atShowInactive'), function (el) { el.disabled = b; });
+  }
+
+  function onSave(evt) {
+    if (state.saving) return;
+    var ids = Object.keys(state.dirty);
+    if (!ids.length) { toast('ยังไม่มีการแก้ไขที่ต้องบันทึก'); return; }
+
+    // ตารางที่เห็นเป็นของเดือนที่ "โหลดอยู่" เท่านั้น — ถ้าเลือกเดือนใหม่ในช่องด้านบนแต่ยังไม่กด "ดู" ห้ามบันทึก (กันเข้าใจผิดว่ากำลังกรอกเดือนที่เลือก)
+    var pickM = Number(document.getElementById('at_m').value), pickY = Number(document.getElementById('at_y').value);
+    if (pickM !== state.month || pickY !== state.year) {
+      showError('ช่องเลือกเดือนด้านบนเป็น ' + MONTHS_TH[pickM] + ' ' + pickY + ' แต่ตารางนี้ยังเป็นของเดือน ' + MONTHS_TH[state.month] + ' ' + state.year + ' — ถ้าต้องการกรอกเดือน ' + MONTHS_TH[pickM] + ' ให้กดปุ่ม "ดู" ก่อน (หรือเลือกกลับเป็นเดือน ' + MONTHS_TH[state.month] + ' ถ้าจะบันทึกเดือนนี้)');
+      return;
+    }
+
+    // เช็คเฉพาะแถวที่แก้ — ค่าแปลกๆ ในแถวที่ไม่ได้แตะ (เช่นพิมพ์ผิดในชีตเอง) ไม่ควรขวางการบันทึกแถวอื่น
+    var bad = null;
+    ids.some(function (id) { var tr = trByEmp[id]; bad = tr ? tr.querySelector('input.atBad') : null; return !!bad; });
+    if (bad) {
+      showError('มีช่องที่กรอกไม่ใช่ตัวเลข (ขอบแดง) — พิมพ์เฉพาะตัวเลข เช่น 1 หรือ 0.5 (ไม่ใช้จุลภาค/เครื่องหมายลบ) แล้วกดบันทึกอีกครั้ง');
+      bad.focus();
+      return;
+    }
+
+    var rows = ids.map(readRowPayload);
+    var month = state.month, year = state.year;
+    showError('');
+    // ต้องเรียก withButtonGuard ก่อน setBusy เสมอ (setBusy ปิดปุ่มทุกปุ่มรวมปุ่มที่กด ถ้าปิดก่อน withButtonGuard จะนึกว่ากำลังบันทึกอยู่แล้วแล้วไม่ทำอะไร)
+    var pending = withButtonGuard(evt.currentTarget || evt.target, function () { return apiPost('saveAttendanceMonthly', { month: month, year: year, rows: rows }); });
+    if (!pending) return; // กำลังบันทึกอยู่แล้ว (กดซ้ำ) — ไม่ทำซ้ำ
+    setBusy(true);
+    pending
+      .then(function (r) {
+        var savedN = (r && r.saved !== undefined) ? r.saved : rows.length, clearedN = (r && r.cleared) ? r.cleared : 0;
+        var parts = [];
+        if (savedN) parts.push('บันทึกแล้ว ' + savedN + ' แถว');
+        if (clearedN) parts.push('ล้างข้อมูล ' + clearedN + ' แถว (กลับไปใช้รายวันเดิมถ้ามี)');
+        toast(parts.length ? parts.join(' · ') : 'บันทึกแล้ว (ไม่มีข้อมูลที่ต้องเปลี่ยน)');
+        state.dirty = {};
+        return loadTable();
+      })
+      .catch(function (e) {
+        // เซิร์ฟเวอร์ตอบเองว่าไม่ผ่าน (เช่นตัวเลขผิด) = แก้ตามข้อความแล้วบันทึกใหม่ได้เลย ; เน็ตหลุด/หมดเวลา = ไม่รู้ว่าฝั่งเซิร์ฟเวอร์เขียนไปหรือยัง
+        var msg = e.message || String(e);
+        showError(e.serverReported
+          ? 'บันทึกไม่สำเร็จ: ' + msg + ' — แก้ตามข้อความแล้วกดบันทึกใหม่ได้เลย (ข้อมูลที่พิมพ์ไว้ยังอยู่)'
+          : 'บันทึกไม่แน่ชัด: ' + msg + ' — ข้อมูลอาจถูกบันทึกไปแล้ว ให้กดปุ่ม "ดู" โหลดตารางใหม่เพื่อตรวจสอบ (หรือกดบันทึกซ้ำได้เลย ปลอดภัย ไม่ทำให้ข้อมูลซ้ำ) — ข้อมูลที่พิมพ์ไว้ยังอยู่');
+        toast(msg, true);
+      })
+      .then(function () { setBusy(false); });
   }
 }
 
@@ -1006,10 +1225,10 @@ function renderAdminCalendar() {
     '<b id="calLabel" style="min-width:78px;text-align:center;"></b>' +
     '<button class="btn secondary small" id="calNext">ถัดไป →</button>' +
     '</div></div>' +
-    '<div class="cardSubtitle">ขาด/ลา/มาสายของทุกคนในแต่ละวัน — เชื่อมกับข้อมูลแท็บ "Attendance" โดยตรง ไม่ต้องกรอกซ้ำ</div>' +
+    '<div class="cardSubtitle">ขาด/ลา/มาสายรายวันของทุกคน — แสดงเฉพาะรายการรายวันเดิมเท่านั้น (เดือนที่กรอกสรุปรายเดือนในตารางแท็บ "Attendance" จะไม่มีรายการในปฏิทินนี้ แต่ตัวเลขถูกนำไปคิดคะแนนและเบี้ยขยันด้านล่างแล้ว)</div>' +
     '<div id="calGrid" class="muted" style="margin-top:14px;">กำลังโหลด...</div>' +
     '</div>' +
-    '<div class="card"><h3>💵 สรุปเบี้ยขยันเดือนนี้</h3><div class="cardSubtitle">คนละก้อนกับเงินพิเศษ/คะแนนโดยสิ้นเชิง ทุกคน Active ได้เท่ากันหมด หักตามนาทีมาสาย/ประเภทการลาที่เห็นในปฏิทินด้านบนเท่านั้น</div><div id="calDiligence" class="muted">กำลังโหลด...</div></div>';
+    '<div class="card"><h3>💵 สรุปเบี้ยขยันเดือนนี้</h3><div class="cardSubtitle">คนละก้อนกับเงินพิเศษ/คะแนนโดยสิ้นเชิง ทุกคน Active ได้เท่ากันหมด หักตามนาทีมาสายรวม/ประเภทการลาของเดือนนั้น (จากตารางรายเดือนในแท็บ "Attendance" หรือจากรายการรายวันในปฏิทินด้านบน) เท่านั้น</div><div id="calDiligence" class="muted">กำลังโหลด...</div></div>';
   document.getElementById('content').innerHTML = html;
 
   document.getElementById('calPrev').addEventListener('click', function () { shiftMonth(-1); });
@@ -1549,7 +1768,22 @@ function renderAdminSummary() {
 // อัตโนมัติ (หลักการเดิมของระบบทุกจุดที่เกี่ยวกับเงิน ไม่เดาสูตรให้) เลือกช่วงเดือน/ปีแบบต่อเนื่อง (จาก → ถึง) แล้วเรียก
 // action "annualSummary" ครั้งเดียว (Backend เฉลี่ย "คะแนนรวม" ของเดือนที่นับได้ให้เสร็จแล้ว ดู getAnnualSummary/computeTenure
 // ใน Code.gs) — "อายุงาน" ต้องกรอก "วันเริ่มงาน" ในชีต Employees เองก่อน (ไม่มีฟอร์มเว็บให้กรอก ระบบเดาให้ไม่ได้)
+// ประเภทที่เลือกดูแบบ "รายเดือน" ในตารางขาด/ลา/มาสายของหน้าสรุปรายปี (key = ชื่อฟิลด์ที่ Backend getAnnualAttendance ส่งมา)
+var ATT_VIEW_METRICS = [
+  { key: 'absent', label: 'ขาด', unit: 'วัน' },
+  { key: 'leaveTotal', label: 'รวมวันลา', unit: 'วัน' },
+  { key: 'sickCert', label: 'ลาป่วย-มีใบ', unit: 'วัน' },
+  { key: 'sickNoCert', label: 'ลาป่วย-ไม่มีใบ', unit: 'วัน' },
+  { key: 'personal', label: 'ลากิจ', unit: 'วัน' },
+  { key: 'vacation', label: 'ลาพักร้อน', unit: 'วัน' },
+  { key: 'unapproved', label: 'ลาไม่อนุมัติ', unit: 'วัน' },
+  { key: 'lateCount', label: 'มาสาย', unit: 'ครั้ง' },
+  { key: 'lateMinutes', label: 'มาสายรวม', unit: 'นาที' },
+  { key: 'ot', label: 'OT', unit: 'ชม.' }
+];
+var _annualRenderSeq = 0; // นับครั้งที่เปิดหน้า "สรุปรายปี" — คำตอบของการเปิดหน้ารอบก่อน (ที่มาช้า) จะถูกทิ้ง ไม่ไปทับตารางของรอบปัจจุบัน
 function renderAdminAnnualSummary() {
+  var myRender = ++_annualRenderSeq;
   var MONTHS_TH = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
   function miniYearMonthSelectHtml(idPrefix, month, year) {
     var mOpts = '', yOpts = '';
@@ -1565,11 +1799,23 @@ function renderAdminAnnualSummary() {
     '<button class="btn" id="as_go" style="margin-top:10px;">ดูสรุป</button>' +
     '<div class="calloutBox mt0" style="margin-top:14px;">คอลัมน์ <b>คะแนนเฉลี่ย</b> = ค่าเฉลี่ย "คะแนนรวม" ของเดือนที่ <b>นับได้</b> เท่านั้น (เดือนที่ยังไม่ประเมิน Work Score เดือนนั้นเป็น PENDING จะไม่ถูกนับเข้าค่าเฉลี่ย แต่โชว์คอลัมน์ "นับได้" ให้เห็นว่านับได้กี่เดือนจากกี่เดือนที่เลือก กันเข้าใจผิดว่าข้อมูลครบแล้ว) · <b>อายุงาน</b> คำนวณ ณ วันสุดท้ายของเดือน "ถึง" ที่เลือก จากคอลัมน์ "วันเริ่มงาน" ในชีต Employees (กรอกเองทีละคนตรงในชีตเลย ไม่มีฟอร์มเว็บให้กรอก) คนที่ยังไม่กรอกจะโชว์ "ยังไม่กรอกวันเริ่มงาน" ตรงไปตรงมา · ไม่รวมเบี้ยขยัน/เงินพิเศษ/Reward Points เพราะเป็นเงินคนละก้อนกันอยู่แล้ว ดูที่หน้า "สรุปคะแนน/เงิน"/"ปฏิทินบริษัท" แทน · พนักงานลาออกแล้วที่มีข้อมูลจริงอยู่ในช่วงที่เลือกจะยังโผล่ในตารางพร้อมป้าย "ลาออกแล้ว" ให้เห็นไว้อ้างอิง</div>' +
     '</div>' +
-    '<div class="card"><div id="asList" class="muted">กำลังโหลด...</div></div>';
+    '<div class="card"><div id="asList" class="muted">กำลังโหลด...</div></div>' +
+    '<div class="card"><h3>🗓 ขาด ลา มาสาย ตามช่วงที่เลือก</h3><div class="cardSubtitle">ตารางสรุปขาด/ลา/มาสายรายคนของ "ช่วงเดือน" ด้านบน (เหมือนชีตสรุปรายปีใน Excel) — ตัวเลขชุดเดียวกับที่ใช้คิดคะแนนขาดลามาสายและเบี้ยขยันของแต่ละเดือน</div>' +
+    '<div class="row"><div><label>แสดงแบบ</label><select id="aaView">' +
+      '<option value="total">รวมทั้งช่วง (ทุกประเภท)</option>' +
+      ATT_VIEW_METRICS.map(function (mt) { return '<option value="' + mt.key + '">รายเดือน: ' + mt.label + ' (' + mt.unit + ')</option>'; }).join('') +
+    '</select></div></div>' +
+    '<div id="aaList" class="muted" style="margin-top:12px;">กำลังโหลด...</div>' +
+    '<div class="calloutBox mt0" style="margin-top:14px;">ช่อง <b>–</b> = เดือนนั้น <b>ยังไม่มีข้อมูล</b> (ไม่ใช่ 0) · ช่อง <b>0</b> = มีข้อมูลเดือนนั้นแล้วและไม่มีรายการ · <b>รวมวันลา</b> = ลาป่วย+ลากิจ+ลาพักร้อน (ไม่รวม "ลาไม่อนุมัติ" และ "ขาด" ซึ่งหักคะแนนและแยกเป็นคอลัมน์ต่างหาก) · ข้อมูลมาจาก <b>ตารางรายเดือน</b> (แท็บ Attendance) ถ้าเดือนนั้นมี ไม่งั้นรวมจากรายการรายวัน</div></div>';
   document.getElementById('content').innerHTML = html;
 
   var lastRows = [];
+  var lastAtt = null;      // ผลล่าสุดของ annualAttendance (null = ยังไม่โหลด/โหลดไม่สำเร็จ)
+  var attSeq = 0;          // กันผลโหลดเก่าทับผลใหม่ (กดดูสรุปรัวๆ)
+  var mainSeq = 0;         // เหมือนกัน แต่สำหรับตารางคะแนนด้านบน
+  function stale(seq, cur) { return myRender !== _annualRenderSeq || seq !== cur; }
   document.getElementById('as_go').addEventListener('click', load);
+  document.getElementById('aaView').addEventListener('change', renderAtt);
   load();
 
   function load() {
@@ -1577,11 +1823,14 @@ function renderAdminAnnualSummary() {
     var toMonth = Number(document.getElementById('asTo_m').value), toYear = Number(document.getElementById('asTo_y').value);
     var el = document.getElementById('asList');
     if (el) el.innerHTML = '<div class="muted">กำลังโหลด...</div>';
+    loadAtt(fromMonth, fromYear, toMonth, toYear);
+    var mySeqMain = ++mainSeq;
     apiGet('annualSummary', { fromMonth: fromMonth, fromYear: fromYear, toMonth: toMonth, toYear: toYear }).then(function (rows) {
-      if (!document.getElementById('asList')) return; // สลับหน้าไปแล้วระหว่างรอโหลด
+      if (stale(mySeqMain, mainSeq) || !document.getElementById('asList')) return; // มีการโหลดใหม่กว่า หรือสลับหน้าไปแล้วระหว่างรอโหลด
       lastRows = rows;
       render();
     }).catch(function (e) {
+      if (stale(mySeqMain, mainSeq)) return;
       var el2 = document.getElementById('asList');
       if (!el2) return;
       el2.innerHTML = '<div class="muted">โหลดไม่สำเร็จ: ' + esc(e.message || String(e)) + ' <button class="btn secondary" id="asRetry" style="margin-left:8px;">ลองใหม่</button></div>';
@@ -1621,6 +1870,130 @@ function renderAdminAnnualSummary() {
           '</tr>';
       }).join('') +
       '</table></div>';
+  }
+
+  /* ---- ส่วนตาราง "ขาด ลา มาสาย" (action annualAttendance) — โหลดแยกจากตารางคะแนน: ส่วนไหนพัง อีกส่วนยังใช้ได้ ---- */
+  function loadAtt(fromMonth, fromYear, toMonth, toYear) {
+    var mySeq = ++attSeq;
+    lastAtt = null;
+    var el = document.getElementById('aaList');
+    if (el) el.innerHTML = '<div class="muted">กำลังโหลด...</div>';
+    apiGet('annualAttendance', { fromMonth: fromMonth, fromYear: fromYear, toMonth: toMonth, toYear: toYear }).then(function (rows) {
+      if (stale(mySeq, attSeq) || !document.getElementById('aaList')) return; // มีการโหลดใหม่กว่า หรือสลับหน้าไปแล้ว
+      lastAtt = rows || [];
+      renderAtt();
+    }).catch(function (e) {
+      if (stale(mySeq, attSeq)) return;
+      var el2 = document.getElementById('aaList');
+      if (!el2) return;
+      el2.innerHTML = '<div class="muted">โหลดตารางขาด/ลา/มาสายไม่สำเร็จ: ' + esc(e.message || String(e)) + ' <button class="btn secondary" id="aaRetry" style="margin-left:8px;">ลองใหม่</button><br>(ถ้าเพิ่งอัปเดตไฟล์เว็บ ต้อง Deploy Apps Script เวอร์ชันใหม่ด้วย ตารางนี้ถึงจะใช้ได้)</div>';
+      var rb = document.getElementById('aaRetry');
+      if (rb) rb.addEventListener('click', function () {
+        loadAtt(Number(document.getElementById('asFrom_m').value), Number(document.getElementById('asFrom_y').value), Number(document.getElementById('asTo_m').value), Number(document.getElementById('asTo_y').value));
+      });
+    });
+  }
+
+  function attCellHtml(v, hasData) {
+    if (!hasData) return '<span class="muted" title="ยังไม่มีข้อมูลเดือนนี้">–</span>';
+    if (!v) return '<span class="muted">0</span>';
+    return '<b>' + fmtNum(v) + '</b>';
+  }
+
+  function attNameCellHtml(r) {
+    var name = esc(r.nickname || r.employeeId);
+    if (r.status && r.status !== 'Active') name += ' <span class="inactiveBadge">ลาออกแล้ว</span>';
+    return '<span title="' + esc((r.fullName || '') + (r.department ? ' · ' + r.department : '')) + '">' + name + '</span>';
+  }
+
+  function renderAtt() {
+    var el = document.getElementById('aaList');
+    var viewSel = document.getElementById('aaView');
+    if (!el || !viewSel || lastAtt === null) return;
+    var rows = lastAtt;
+    if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีข้อมูล</div>'; return; }
+    var view = viewSel.value;
+    var multiYear = rows[0].monthly.some(function (m) { return m.year !== rows[0].monthly[0].year; });
+    var html;
+
+    if (view === 'total') {
+      var hasOther = rows.some(function (r) { return r.totals.otherLeave > 0; });
+      var cols = [
+        { key: 'absent', label: 'ขาด<br><small>(วัน)</small>' },
+        { key: 'sickCert', label: 'ลาป่วย<br>มีใบ' },
+        { key: 'sickNoCert', label: 'ลาป่วย<br>ไม่มีใบ' },
+        { key: 'personal', label: 'ลากิจ' },
+        { key: 'vacation', label: 'ลาพักร้อน' }
+      ];
+      if (hasOther) cols.push({ key: 'otherLeave', label: 'ลาอื่นๆ<br><small>(ไม่ระบุประเภท)</small>' });
+      cols.push({ key: 'leaveTotal', label: 'รวมวันลา', divider: true });
+      cols.push({ key: 'unapproved', label: 'ลาไม่<br>อนุมัติ' });
+      cols.push({ key: 'lateCount', label: 'มาสาย<br><small>(ครั้ง)</small>', divider: true });
+      cols.push({ key: 'lateMinutes', label: 'มาสาย<br><small>(นาที)</small>' });
+      cols.push({ key: 'ot', label: 'OT<br><small>(ชม.)</small>' });
+      var sums = {};
+      cols.forEach(function (c) { sums[c.key] = 0; });
+      var anyData = rows.some(function (r) { return r.monthsWithData > 0; });
+      html = '<div style="overflow-x:auto;"><table class="simple" id="aaTable"><tr><th class="aaName">ชื่อ</th><th>แผนก</th>' +
+        cols.map(function (c) { return '<th' + (c.divider ? ' class="colDivider"' : '') + ' style="text-align:center;">' + c.label + '</th>'; }).join('') +
+        '<th class="colDivider" style="text-align:center;">เดือนที่มีข้อมูล</th></tr>' +
+        rows.map(function (r) {
+          cols.forEach(function (c) { sums[c.key] += r.totals[c.key] || 0; });
+          var incomplete = r.monthsWithData < r.monthsSelected;
+          return '<tr' + (r.status && r.status !== 'Active' ? ' class="inactiveRow"' : '') + '>' +
+            '<td class="aaName">' + attNameCellHtml(r) + '</td>' +
+            '<td>' + esc(r.department) + '</td>' +
+            cols.map(function (c) { return '<td' + (c.divider ? ' class="colDivider"' : '') + ' style="text-align:center;">' + attCellHtml(r.totals[c.key], r.monthsWithData > 0) + '</td>'; }).join('') +
+            '<td class="colDivider" style="text-align:center;">' + (incomplete ? '<span class="muted">' : '') + r.monthsWithData + ' / ' + r.monthsSelected + (incomplete ? '</span>' : '') + '</td>' +
+            '</tr>';
+        }).join('') +
+        '<tr class="aaFoot"><td class="aaName"><b>รวมทั้งหมด</b></td><td></td>' +
+        cols.map(function (c) { return '<td' + (c.divider ? ' class="colDivider"' : '') + ' style="text-align:center;">' + (anyData ? '<b>' + fmtNum(Math.round(sums[c.key] * 100) / 100) + '</b>' : '<span class="muted">–</span>') + '</td>'; }).join('') +
+        '<td class="colDivider"></td></tr></table></div>';
+    } else {
+      var metric = null;
+      ATT_VIEW_METRICS.forEach(function (mt) { if (mt.key === view) metric = mt; });
+      if (!metric) { el.innerHTML = ''; return; }
+      var months = rows[0].monthly;
+      var colSums = months.map(function () { return 0; });
+      var colHas = months.map(function (m, i) { return rows.some(function (r) { return r.monthly[i].hasData; }); });
+      var grand = 0;
+      var anyData2 = rows.some(function (r) { return r.monthsWithData > 0; });
+      html = '<div style="overflow-x:auto;"><table class="simple" id="aaTable"><tr><th class="aaName">ชื่อ</th>' +
+        months.map(function (m) { return '<th style="text-align:center;">' + MONTHS_TH[m.month] + (multiYear ? '<br><small>' + m.year + '</small>' : '') + '</th>'; }).join('') +
+        '<th class="colDivider" style="text-align:center;">รวม<br><small>(' + metric.unit + ')</small></th></tr>' +
+        rows.map(function (r) {
+          grand += r.totals[metric.key] || 0;
+          return '<tr' + (r.status && r.status !== 'Active' ? ' class="inactiveRow"' : '') + '>' +
+            '<td class="aaName">' + attNameCellHtml(r) + '</td>' +
+            r.monthly.map(function (m, i) {
+              if (m.hasData) colSums[i] += m[metric.key] || 0;
+              return '<td style="text-align:center;">' + attCellHtml(m[metric.key], m.hasData) + '</td>';
+            }).join('') +
+            '<td class="colDivider totalCell" style="text-align:center;">' + attCellHtml(r.totals[metric.key], r.monthsWithData > 0) + '</td></tr>';
+        }).join('') +
+        '<tr class="aaFoot"><td class="aaName"><b>รวมทั้งหมด</b></td>' +
+        colSums.map(function (v, i) { return '<td style="text-align:center;">' + (colHas[i] ? '<b>' + fmtNum(Math.round(v * 100) / 100) + '</b>' : '<span class="muted">–</span>') + '</td>'; }).join('') +
+        '<td class="colDivider" style="text-align:center;">' + (anyData2 ? '<b>' + fmtNum(Math.round(grand * 100) / 100) + '</b>' : '<span class="muted">–</span>') + '</td></tr></table></div>';
+    }
+
+    // เดือนที่ "ไม่มีข้อมูลเลยสักคน" ในช่วงที่เลือก — เตือนให้เห็นชัด กันเข้าใจผิดว่าเป็นศูนย์ทั้งบริษัท
+    var emptyMonths = rows[0].monthly.filter(function (m, i) { return !rows.some(function (r) { return r.monthly[i].hasData; }); });
+    if (emptyMonths.length) {
+      html += '<div class="muted" style="margin-top:10px;">เดือนที่ยังไม่มีข้อมูลเลย: ' + emptyMonths.map(function (m) { return MONTHS_TH[m.month] + (multiYear ? ' ' + m.year : ''); }).join(', ') + ' (ยังไม่ได้กรอกตารางรายเดือน)</div>';
+    }
+    el.innerHTML = html;
+
+    // ตรึงคอลัมน์ชื่อไว้ซ้ายเวลาเลื่อนดูมือถือ (ใช้สีพื้นเดียวกับการ์ด เหมือนตาราง Attendance)
+    var bg = '#fff';
+    try {
+      var cardEl = el.closest('.card');
+      var cs = cardEl ? window.getComputedStyle(cardEl).backgroundColor : '';
+      if (cs && cs !== 'transparent' && cs !== 'rgba(0, 0, 0, 0)') bg = cs;
+    } catch (e) { /* ใช้สีขาวไปก่อน */ }
+    Array.prototype.forEach.call(el.querySelectorAll('.aaName'), function (c) {
+      c.style.position = 'sticky'; c.style.left = '0'; c.style.zIndex = '1'; c.style.background = bg; c.style.boxShadow = '1px 0 0 rgba(0,0,0,.08)';
+    });
   }
 }
 
