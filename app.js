@@ -164,6 +164,61 @@ function sumField(rows, key) {
   return rows.reduce(function (sum, r) { var n = Number(r[key]); return sum + (isNaN(n) ? 0 : n); }, 0);
 }
 
+// V3: โครงสร้างคะแนนเต็มรายเดือน (Work/Error/ขาดลามาสาย/พัฒนาตัวเอง/อายุงาน + ตัวคูณคะแนนหัก Error) — Backend ส่งมาให้ทุกแถวของ companyMonthlyScores
+// (_workWeight ฯลฯ) และใน scoreWeights/workScoreBulk/selfDevBulk (workWeight ฯลฯ) หน้าเว็บอ่านจากตรงนี้ทั้งหมด ไม่ Hardcode 20/60/20 แล้ว
+// เพราะแต่ละเดือนไม่เหมือนกัน (ส.ค./ก.ย./ต.ค. 2026 ต่างกัน — ดูชีต Score_Structure) ค่าที่ไม่มีมา (Backend เก่า) ใช้โครงเดิม 20/60/20
+function weightsOf(src) {
+  function pick(a, b, d) {
+    if (src && typeof src[a] === 'number') return src[a];
+    if (src && typeof src[b] === 'number') return src[b];
+    return d;
+  }
+  var w = {
+    work: pick('_workWeight', 'workWeight', 20), error: pick('_errorWeight', 'errorWeight', 60), att: pick('_attendanceWeight', 'attendanceWeight', 20),
+    selfDev: pick('_selfDevWeight', 'selfDevWeight', 0), tenure: pick('_tenureWeight', 'tenureWeight', 0), errorScale: pick('_errorDeductScale', 'errorDeductScale', 1)
+  };
+  w.total = w.work + w.error + w.att + w.selfDev + w.tenure;
+  return w;
+}
+function structureText(w) {
+  var parts = [];
+  if (w.work > 0) parts.push('Work ' + w.work);
+  if (w.error > 0) parts.push('Error ' + w.error);
+  if (w.att > 0) parts.push('ขาดลามาสาย ' + w.att);
+  if (w.selfDev > 0) parts.push('พัฒนาตัวเอง ' + w.selfDev);
+  if (w.tenure > 0) parts.push('อายุงาน ' + w.tenure);
+  return parts.join(' + ') + ' = ' + w.total;
+}
+// กล่องบอกโครงสร้างคะแนนของเดือนที่กำลังดู (+ หมายเหตุพิเศษของเดือนนั้น เช่น ไม่นับ Work Score / หัก Error ครึ่งเดียว)
+function structureNoteHtml(w, style) {
+  var notes = [];
+  if (w.work === 0) notes.push('เดือนนี้ไม่นับ Work Score');
+  if (w.errorScale !== 1) {
+    var lv = (APP.severityLevels || []).filter(function (s) { return typeof s.points === 'number'; });
+    notes.push('คะแนนที่หักต่อเหตุการณ์ Error × ' + w.errorScale + (lv.length ? ' (ระดับ ' + lv.map(function (s) { return s.level; }).join('/') + ' หัก ' + lv.map(function (s) { return fmtNum(s.points * w.errorScale); }).join('/') + ')' : ''));
+  }
+  return '<div class="calloutBox" style="' + (style || 'margin-top:8px;') + '">📌 โครงสร้างคะแนนเดือนนี้: <b>' + esc(structureText(w)) + '</b>' + (notes.length ? ' · ' + esc(notes.join(' · ')) : '') + '</div>';
+}
+// ช่องคะแนนที่อาจเป็น PENDING (ข้อความยาวบอกสาเหตุ) — ในตารางสรุปโชว์แค่ "PENDING" สั้นๆ เอาเมาส์ชี้ดูสาเหตุเต็มได้ (ตัวเลขโชว์ปกติ)
+function pendingShortHtml(v) {
+  if (typeof v === 'string' && v.indexOf('PENDING') === 0) return '<span class="muted" title="' + esc(v) + '">PENDING</span>';
+  return fmtNum(v);
+}
+
+// คะแนนรวมที่เป็น PENDING — โชว์ "PENDING" + สาเหตุเต็มเป็นบรรทัดเล็กๆ ใต้ (สาเหตุอาจมีหลายอย่างพร้อมกัน เช่น รอ Work Score / รอคะแนนพัฒนาตัวเอง / ยังไม่กรอกวันเริ่มงาน)
+function pendingBlockHtml(v) {
+  if (typeof v === 'string' && v.indexOf('PENDING') === 0) {
+    var reason = v.replace(/^PENDING\s*-?\s*/, '');
+    return '<span class="muted">PENDING</span>' + (reason ? '<div class="muted" style="font-size:11px;font-weight:400;white-space:normal;min-width:130px;max-width:230px;">' + esc(reason) + '</div>' : '');
+  }
+  return fmtNum(v);
+}
+// ช่องคะแนนของหมวดที่เดือนนี้ไม่มีในโครงสร้าง (เต็ม 0) โชว์ "–" แทนเลข 0 — เลข 0 จริงๆ (ได้ 0 คะแนน) ต้องเห็นต่างจาก "ไม่มีหมวดนี้"
+function compCellHtml(v, weight) {
+  if (weight === 0) return '<span class="muted" title="เดือนนี้ไม่มีหมวดนี้ในโครงสร้างคะแนน">–</span>';
+  return pendingShortHtml(v);
+}
+
 function monthPickerHtml(id, month, year) {
   var months = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
   var mOpts = '', yOpts = '';
@@ -448,6 +503,7 @@ function renderAdminPasswordGate() {
 var ADMIN_TABS = [
   { key: 'dashboard', label: 'Dashboard', icon: '📊', render: renderAdminDashboard },
   { key: 'workscore', label: 'ประเมิน Work Score', icon: '🎯', render: renderAdminWorkScore },
+  { key: 'selfdev', label: 'คะแนนพัฒนาตัวเอง', icon: '🌱', render: renderAdminSelfDev },
   { key: 'error', label: 'Error', icon: '⚠️', render: renderAdminError },
   { key: 'gooddeed', label: 'Good Deed', icon: '🌟', render: renderAdminGoodDeed },
   { key: 'attendance', label: 'Attendance', icon: '🗓️', render: renderAdminAttendance },
@@ -508,19 +564,19 @@ function renderAdminDashboard() {
     apiGet('companyMonthlyScores', { month: month, year: year }).then(function (rows) {
       var r = rows.filter(function (x) { return x['รหัสพนักงาน'] === employeeId; })[0];
       if (!r) { area.innerHTML = '<div class="card muted">ไม่พบข้อมูลพนักงานคนนี้ในเดือนที่เลือก</div>'; return; }
-      // ตัวหารของแต่ละหมวดดึงมาจาก Backend สดๆ ทุกครั้ง (_workWeight/_errorWeight/_attendanceWeight) เผื่อเดือนนี้เข้าเงื่อนไข
-      // "สัดส่วนคะแนนพิเศษเฉพาะเดือน" (ดู getEffectiveScoreWeights ฝั่ง Backend) — ไม่ Hardcode 20/60/20/100 อีกต่อไป
-      var workW = (typeof r['_workWeight'] === 'number') ? r['_workWeight'] : 20;
-      var errW = (typeof r['_errorWeight'] === 'number') ? r['_errorWeight'] : 60;
-      var attW = (typeof r['_attendanceWeight'] === 'number') ? r['_attendanceWeight'] : 20;
-      var totalW = workW + errW + attW;
+      // ตัวหารของแต่ละหมวดดึงมาจาก Backend สดๆ ทุกครั้ง (_workWeight/_errorWeight/... ดู weightsOf) เพราะโครงสร้างคะแนนแต่ละเดือน
+      // ไม่เหมือนกัน (ชีต Score_Structure) — ไม่ Hardcode 20/60/20/100 อีกต่อไป หมวดที่เดือนนี้ไม่มี (เต็ม 0) ไม่โชว์การ์ด
+      var wt = weightsOf(r);
+      var totalW = wt.total;
       area.innerHTML =
-        (r['_weightOverridden'] ? '<div class="calloutBox">📌 เดือนนี้ใช้สัดส่วนคะแนนพิเศษ: Work ' + workW + ' + Error ' + errW + ' + Attendance ' + attW + ' (ปกติ Work 20 + Error 60 + Attendance 20) — ตั้งได้ที่ชีต Config</div>' : '') +
+        structureNoteHtml(wt, 'margin-bottom:12px;') +
         '<div class="statGrid">' +
         statCardHtml('accentCoral', '🏆', 'คะแนนรวม (Performance)', r['คะแนนรวม'], totalW) +
-        statCardHtml('accentBlue', '🎯', 'Work Score', r['คะแนนงาน'], workW) +
-        statCardHtml('accentAmber', '⚠️', 'Error Score', r['คะแนนความผิด'], errW) +
-        statCardHtml('accentGreen', '🗓️', 'Attendance', r['คะแนนขาดลามาสาย'], attW) +
+        (wt.work > 0 ? statCardHtml('accentBlue', '🎯', 'Work Score', r['คะแนนงาน'], wt.work) : '') +
+        (wt.error > 0 ? statCardHtml('accentAmber', '⚠️', 'Error Score', r['คะแนนความผิด'], wt.error) : '') +
+        (wt.att > 0 ? statCardHtml('accentGreen', '🗓️', 'Attendance', r['คะแนนขาดลามาสาย'], wt.att) : '') +
+        (wt.selfDev > 0 ? statCardHtml('accentGreen', '🌱', 'พัฒนาตัวเอง', r['คะแนนพัฒนาตัวเอง'], wt.selfDev) : '') +
+        (wt.tenure > 0 ? statCardHtml('accentAmber', '🏅', 'อายุงาน', r['คะแนนอายุงาน'], wt.tenure, r['_tenureNote']) : '') +
         statCardHtml('', '🌟', 'Reward Points สะสม', r['Reward Points สะสม'], null, 'แยกจาก Performance Score ' + totalW + ' คะแนนโดยสิ้นเชิง ใช้สะสมแลกรางวัลตามเกณฑ์บริษัท ไม่รวมกับคะแนนด้านบน') +
         '</div>' +
         '<div class="card"><h3>💰 เงินพิเศษเดือนนี้</h3><div class="statValue" style="font-size:22px;">' + fmtNum(r['เงินพิเศษ']) + '</div>' +
@@ -571,6 +627,7 @@ function renderAdminError() {
     '<div id="eEditBanner" class="calloutBox amber" style="display:none;margin-bottom:12px;">✏️ กำลังแก้ไขเหตุการณ์ <b id="eEditBannerId"></b> — บันทึกจะอัปเดตรายการเดิม ไม่สร้างรายการใหม่ <button class="btn secondary small" id="eCancelEdit" style="margin-left:8px;">ยกเลิกการแก้ไข</button></div>' +
     '<div class="row"><div><label>วันที่เกิดเหตุ</label><input type="date" id="eDate" value="' + todayStr() + '"></div>' +
     '<div><label>แผนก (อัตโนมัติจากผู้รับผิดชอบที่เลือกด้านบน)</label><input type="text" id="eDept" readonly placeholder="— เลือกผู้รับผิดชอบก่อน —"></div></div>' +
+    '<div id="eScaleNote"></div>' +
     '<label>ประเภทความผิด</label><select id="eType">' + typeOptions + '</select>' +
     '<label>รายละเอียดเหตุการณ์</label><textarea id="eDesc"></textarea>' +
     '<label>ค่าเสียหายจริง (บาท ถ้ามี — ไม่มีผลต่อคะแนน)</label><input type="number" id="eDamage"></div>' +
@@ -602,9 +659,41 @@ function renderAdminError() {
   }
   document.getElementById('eCancelEdit').addEventListener('click', function () { resetFormToAddMode(); });
 
+  // V3: คะแนนที่หักต่อเหตุการณ์ Error ถูกคูณด้วย "ตัวคูณ" ของเดือนที่เหตุการณ์เกิด (ชีต Score_Structure — ต.ค. 2026 เป็นต้นไป 0.5 = หักครึ่งเดียว)
+  // ตัวเลขในการ์ด "ระดับความรุนแรง" เป็นค่าเต็มตาม Config จึงต้องบอกให้ชัดว่าเดือนนี้หักจริงเท่าไหร่ — ดึง scoreWeights ของเดือนที่เลือก (แคชไว้ต่อเดือน)
+  var scaleCache = {};
+  function getScaleWeights(month, year) {
+    var key = year + '-' + month;
+    if (scaleCache[key]) return Promise.resolve(scaleCache[key]);
+    return apiGet('scoreWeights', { month: month, year: year }).then(function (w) { scaleCache[key] = w; return w; });
+  }
+  function refreshScaleNote() {
+    var dateEl = document.getElementById('eDate'), noteEl = document.getElementById('eScaleNote');
+    if (!dateEl || !noteEl) return;
+    var v = dateEl.value;
+    var m = /^(\d{4})-(\d{2})-/.exec(v || '');
+    if (!m) { noteEl.innerHTML = ''; return; }
+    var month = Number(m[2]), year = Number(m[1]);
+    getScaleWeights(month, year).then(function (w) {
+      var el2 = document.getElementById('eScaleNote'), d2 = document.getElementById('eDate');
+      if (!el2 || !d2 || d2.value !== v) return; // สลับหน้า/เปลี่ยนวันที่ไปแล้วระหว่างรอโหลด
+      var wt = weightsOf(w);
+      if (wt.errorScale === 1) { el2.innerHTML = ''; return; }
+      var lv = (APP.severityLevels || []).filter(function (s) { return typeof s.points === 'number'; });
+      el2.innerHTML = '<div class="calloutBox amber" style="margin:8px 0;">📌 เหตุการณ์ที่เกิดเดือน ' + month + '/' + year + ': ระบบหักคะแนน Error เพียง <b>× ' + wt.errorScale + '</b> ของตัวเลขในการ์ด "ระดับความรุนแรง"' +
+        (lv.length ? ' (หักจริงระดับ ' + lv.map(function (s) { return s.level; }).join('/') + ' = ' + lv.map(function (s) { return fmtNum(s.points * wt.errorScale); }).join('/') + ')' : '') + ' — ตามโครงสร้างคะแนนของเดือนนั้น</div>';
+    }).catch(function (err) {
+      var el3 = document.getElementById('eScaleNote'), d3 = document.getElementById('eDate');
+      if (el3 && d3 && d3.value === v) el3.innerHTML = '<div class="calloutBox amber" style="margin:8px 0;">⚠️ ตรวจตัวคูณคะแนนหัก Error ของเดือน ' + month + '/' + year + ' ไม่ได้ (' + esc((err && err.message) || String(err)) + ') — ตัวเลขในการ์ด "ระดับความรุนแรง" อาจไม่ใช่ที่ระบบหักจริง ตรวจชีต Score_Structure</div>';
+    });
+  }
+  document.getElementById('eDate').addEventListener('change', refreshScaleNote);
+  refreshScaleNote();
+
   function resetFormToAddMode() {
     setEditMode(null);
     document.getElementById('eDate').value = todayStr();
+    refreshScaleNote();
     document.getElementById('eType').selectedIndex = 0;
     document.getElementById('eDesc').value = '';
     document.getElementById('eDamage').value = '';
@@ -695,6 +784,7 @@ function renderAdminError() {
   function startEdit(eventId) {
     apiGet('errorEventDetail', { eventId: eventId }).then(function (d) {
       document.getElementById('eDate').value = d.date;
+      refreshScaleNote();
       document.getElementById('eType').value = d.errorTypeId;
       document.getElementById('eDesc').value = d.description || '';
       document.getElementById('eDamage').value = d.damageAmount;
@@ -761,22 +851,32 @@ function renderAdminError() {
 
   document.getElementById('el_go').addEventListener('click', loadEvents);
   loadEvents();
-  function renderMonthStats(rows) {
+  function renderMonthStats(rows, scale) {
     var stats = document.getElementById('eMonthStats');
-    var totalDeduct = rows.reduce(function (s, r) { return s + (Number(r['คะแนนต่อคน']) || 0); }, 0);
+    scale = (typeof scale === 'number') ? scale : 1;
+    var totalDeduct = rows.reduce(function (s, r) { return s + (Number(r['คะแนนต่อคน']) || 0); }, 0) * scale;
     var respSet = {};
     rows.forEach(function (r) { String(r['ผู้รับผิดชอบ'] || '').split(',').forEach(function (n) { n = n.trim(); if (n) respSet[n] = true; }); });
     stats.innerHTML =
       '<div class="statCard accentAmber"><span class="statIcon">🗂️</span><div class="statLabel">Error เดือนนี้</div><div class="statValue">' + rows.length + '</div></div>' +
-      '<div class="statCard accentAmber"><span class="statIcon">📉</span><div class="statLabel">คะแนนที่ถูกหักรวม</div><div class="statValue">' + fmtNum(totalDeduct) + '</div></div>' +
+      '<div class="statCard accentAmber"><span class="statIcon">📉</span><div class="statLabel">คะแนนที่ถูกหักรวม' + (scale !== 1 ? ' (× ' + scale + ')' : '') + '</div><div class="statValue">' + fmtNum(totalDeduct) + '</div></div>' +
       '<div class="statCard accentAmber"><span class="statIcon">👥</span><div class="statLabel">จำนวนผู้รับผิดชอบ</div><div class="statValue">' + Object.keys(respSet).length + '</div></div>';
   }
   function loadEvents() {
-    apiGet('errorEventsForMonth', { month: Number(document.getElementById('el_m').value), year: Number(document.getElementById('el_y').value) }).then(function (rows) {
-      renderMonthStats(rows);
+    var lm = Number(document.getElementById('el_m').value), ly = Number(document.getElementById('el_y').value);
+    // ดึงรายการเหตุการณ์ + ตัวคูณคะแนนหักของเดือนนั้นพร้อมกัน (ขนาน ไม่รอกัน) — ถ้าดึงตัวคูณไม่ได้ ยังโชว์รายการได้ (ค่าเต็มตามที่บันทึก)
+    // แต่ต้องมีแถบเตือนชัดๆ ว่าตัวเลขอาจไม่ใช่ที่ระบบหักจริง (ห้ามเงียบแล้วโชว์เหมือนหักเต็ม)
+    Promise.all([
+      apiGet('errorEventsForMonth', { month: lm, year: ly }),
+      getScaleWeights(lm, ly).then(function (w) { return { scale: weightsOf(w).errorScale }; }, function (err) { return { scale: 1, error: (err && err.message) || String(err) }; })
+    ]).then(function (res) {
+      var rows = res[0], scale = res[1].scale;
+      var scaleWarnHtml = res[1].error
+        ? '<div class="calloutBox amber" style="margin-bottom:8px;">⚠️ ตรวจตัวคูณคะแนนหัก Error ของเดือนนี้ไม่ได้ (' + esc(res[1].error) + ') — ตัวเลขด้านล่างเป็นค่าเต็มตามที่บันทึก อาจไม่ใช่ที่ระบบหักจริง ตรวจชีต Score_Structure</div>' : '';
+      renderMonthStats(rows, scale);
       var el = document.getElementById('elList');
-      if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีข้อมูลเดือนนี้</div>'; return; }
-      el.innerHTML = rows.map(function (r) {
+      if (!rows.length) { el.innerHTML = scaleWarnHtml + '<div class="muted">ไม่มีข้อมูลเดือนนี้</div>'; return; }
+      el.innerHTML = scaleWarnHtml + rows.map(function (r) {
         var reporterHtml = r['รหัสรางวัล']
           ? '<div class="meta">ผู้แจ้ง: ' + esc(r['ชื่อผู้แจ้ง']) + ' (' + esc(r['ประเภทการแจ้ง']) + ', +' + fmtNum(r['คะแนนรางวัลผู้แจ้ง']) + ' คะแนน) ' + statusBadge(r['สถานะรางวัล']) +
             ' <select class="rwStChg" data-id="' + r['รหัสรางวัล'] + '"><option ' + (r['สถานะรางวัล'] === 'Pending' ? 'selected' : '') + '>Pending</option><option ' + (r['สถานะรางวัล'] === 'Approved' ? 'selected' : '') + '>Approved</option><option ' + (r['สถานะรางวัล'] === 'Rejected' ? 'selected' : '') + '>Rejected</option></select></div>'
@@ -785,7 +885,7 @@ function renderAdminError() {
         var actionsHtml = '<div class="rowActions" style="margin-top:6px;">' +
           '<button class="btn secondary small elEdit" data-id="' + esc(r['รหัสเหตุการณ์']) + '">✏️ แก้ไข</button> ' +
           '<button class="btn secondary small elDelete" data-id="' + esc(r['รหัสเหตุการณ์']) + '" style="color:#c0392b;border-color:#c0392b;">🗑️ ลบ</button></div>';
-        return '<div class="list-item"><b>' + esc(r['รหัสเหตุการณ์']) + '</b> — ' + esc(r['ชื่อประเภทความผิด']) + ' — ' + esc(r['ผลกระทบ']) + ' (ระดับ ' + r['ระดับ'] + ', ' + r['คะแนนต่อคน'] + ')<div class="meta">' + fmtDate(r['วันที่']) + ' · ' + esc(r['แผนก']) + ' · ผู้รับผิดชอบ: ' + esc(r['ผู้รับผิดชอบ']) + '</div>' + reporterHtml + actionsHtml + '</div>';
+        return '<div class="list-item"><b>' + esc(r['รหัสเหตุการณ์']) + '</b> — ' + esc(r['ชื่อประเภทความผิด']) + ' — ' + esc(r['ผลกระทบ']) + ' (ระดับ ' + r['ระดับ'] + ', ' + r['คะแนนต่อคน'] + (scale !== 1 ? ' → หักจริง ' + fmtNum((Number(r['คะแนนต่อคน']) || 0) * scale) : '') + ')<div class="meta">' + fmtDate(r['วันที่']) + ' · ' + esc(r['แผนก']) + ' · ผู้รับผิดชอบ: ' + esc(r['ผู้รับผิดชอบ']) + '</div>' + reporterHtml + actionsHtml + '</div>';
       }).join('');
       Array.prototype.forEach.call(el.querySelectorAll('.rwStChg'), function (sel) {
         sel.addEventListener('change', function () {
@@ -1523,8 +1623,10 @@ function renderAdminWorkScore() {
     var note = document.getElementById('wsWeightNote');
     if (note) {
       var w = wsBulk ? wsBulk.weights : null;
-      note.innerHTML = (w && w.overridden)
-        ? '<div class="calloutBox mt0">📌 เดือนนี้ใช้สัดส่วนคะแนนพิเศษ: Work Score เต็ม ' + w.workWeight + ' (ไม่นับ' + (w.workWeight === 0 ? ' เลย' : '') + ') + Error เต็ม ' + w.errorWeight + ' + Attendance เต็ม ' + w.attendanceWeight + ' — กรอกคะแนนด้านล่างได้ตามปกติ แต่จะไม่มีผลกับคะแนนรวมเดือนนี้ถ้า Work Weight = 0</div>'
+      // V3: โครงสร้างคะแนนของเดือนนี้ (Work/Error/ขาดลามาสาย/พัฒนาตัวเอง/อายุงาน) + หมายเหตุ เช่น เดือนที่ไม่นับ Work Score (Work เต็ม 0)
+      // กรอกได้ตามปกติแต่ไม่มีผลกับคะแนนรวมเดือนนั้น
+      note.innerHTML = (w && typeof w.workWeight === 'number')
+        ? structureNoteHtml(weightsOf(w), 'margin-top:0;') + (w.workWeight === 0 ? '<div class="muted" style="margin:6px 0;">เดือนนี้กรอกคะแนน Work Score ได้ตามปกติ แต่จะไม่มีผลกับคะแนนรวมเดือนนี้ (Work เต็ม 0)</div>' : '')
         : '';
     }
     var d = wsBulk ? wsBulk.detail[employeeId] : null;
@@ -1607,6 +1709,150 @@ function renderAdminWorkScore() {
   }
 }
 
+/* ---- 8.5 คะแนนการพัฒนาตัวเอง (V3 — พี่ให้ 0-10 เองทุกเดือน เริ่ม ต.ค. 2026 ตามชีต Score_Structure) ---- */
+// แพทเทิร์นเดียวกับหน้า Work Score: โหลดข้อมูล "ทั้งเดือน ทุกคน" ครั้งเดียว (action selfDevBulk) แล้วสลับพนักงานจากแคชในเครื่อง ไม่ยิง Server
+// ตอนสลับคน — คะแนนเต็มของเดือน (ปัจจุบัน 10) อ่านจาก Backend ทุกครั้งไม่ Hardcode เดือนที่โครงสร้างไม่มีส่วนนี้ (เต็ม 0 เช่น ก.ย./ส.ค. 2026)
+// หน้านี้จะไม่ให้กรอก (Backend ก็ปฏิเสธอีกชั้น) มีตาราง "สรุปเดือนนี้" ให้เห็นว่าใครให้แล้ว/ยัง กดแถวเพื่อเลือกคนนั้นกรอกต่อได้เลย
+// พนักงานแผนก Support & Strategy ไม่รวมในระบบนี้ (เหมือน Work Score — มีระบบประเมินแยกต่างหาก)
+var _lastSelfDevEvaluator = ''; // จำชื่อผู้ประเมินล่าสุดไว้ในหน้าเว็บ (ในหน่วยความจำเท่านั้น) ไม่ต้องพิมพ์ใหม่ทุกคน
+function renderAdminSelfDev() {
+  var eligible = APP.employees.filter(function (e) { return e.department !== 'Support & Strategy'; });
+  var html =
+    '<div class="card"><h3>🌱 คะแนนการพัฒนาตัวเอง</h3><div class="cardSubtitle">พี่ให้คะแนนเองทุกเดือน (เหมือน Work Score) — ใช้เมื่อโครงสร้างคะแนนของเดือนนั้นมีส่วนนี้ (ตอนนี้เริ่มตั้งแต่ ต.ค. 2026 เต็ม 10)</div>' +
+    monthPickerHtml('sd', APP.month, APP.year) +
+    '<div id="sdWeightNote"></div></div>' +
+
+    '<div class="card"><h3>📝 ให้คะแนน</h3>' +
+    '<label>พนักงาน</label><select id="sdEmp">' + employeeOptions(eligible) + '</select>' +
+    '<div id="sdExisting" class="muted" style="margin:6px 0;">กำลังโหลด...</div>' +
+    '<label id="sdScoreLabel">คะแนนการพัฒนาตัวเอง</label><input type="number" id="sdScore" min="0" step="0.5">' +
+    '<label>ผู้ประเมิน</label><input type="text" id="sdEvaluator" placeholder="ชื่อผู้ประเมิน">' +
+    '<label>หมายเหตุ</label><textarea id="sdNote" placeholder="เช่น ไปอบรม/เรียนคอร์สออนไลน์/อ่านหนังสือที่เกี่ยวกับงาน"></textarea>' +
+    '<button class="btn" id="sdSave">✓ บันทึกคะแนนการพัฒนาตัวเอง</button> ' +
+    '<button class="btn secondary" id="sdDelete" style="display:none;color:#c0392b;border-color:#c0392b;">🗑️ ลบคะแนนนี้ (เลือกคนผิด)</button>' +
+    '<div class="muted" style="margin-top:8px;">กดบันทึกแล้วคะแนนรวม/เงินพิเศษจะไปอัปเดตที่ "สรุปคะแนน/เงิน" และ Dashboard ทันที — เดือนที่มีส่วนนี้ ใครยังไม่ได้ให้คะแนน คะแนนรวมของคนนั้นจะเป็น PENDING และยังไม่นับเข้าเงินพิเศษ</div></div>' +
+
+    '<div class="card"><h3>📋 สรุปเดือนนี้</h3><div id="sdSummary" class="muted">กำลังโหลด...</div></div>';
+  document.getElementById('content').innerHTML = html;
+  if (!eligible.length) return;
+
+  var sdBulk = null; // { month, year, weights, detail:{empId:{score,evaluator,evalDate,note}} }
+  var sdSeq = 0;     // กันคำตอบเก่า (เปลี่ยนเดือนรัวๆ) มาทับเดือนที่เลือกล่าสุด
+
+  function maxScore() { return sdBulk ? weightsOf(sdBulk.weights).selfDev : 0; }
+
+  function renderSummary() {
+    var el = document.getElementById('sdSummary'); if (!el) return;
+    var max = maxScore();
+    if (!sdBulk) { el.textContent = 'กำลังโหลด...'; return; }
+    if (!(max > 0)) { el.innerHTML = '<span class="muted">เดือนนี้ไม่มีส่วนคะแนนการพัฒนาตัวเอง</span>'; return; }
+    var done = eligible.filter(function (e) { return sdBulk.detail[e.id]; }).length;
+    el.innerHTML = '<div class="muted" style="margin-bottom:8px;">ให้คะแนนแล้ว <b>' + done + ' / ' + eligible.length + '</b> คน — กดที่แถวเพื่อเลือกคนนั้น</div>' +
+      '<div style="overflow-x:auto"><table class="simple" id="sdSummaryTable"><tr><th>ชื่อ</th><th>แผนก</th><th>คะแนน</th><th>ผู้ประเมิน</th></tr>' +
+      eligible.map(function (e) {
+        var d = sdBulk.detail[e.id];
+        return '<tr data-emp="' + esc(e.id) + '" style="cursor:pointer;"><td>' + esc(e.nickname || e.name) + '</td><td>' + esc(e.department) + '</td>' +
+          '<td>' + (d ? ('<b>' + fmtNum(d.score) + '</b> / ' + max) : '<span class="muted">ยังไม่ให้</span>') + '</td><td>' + (d ? esc(d.evaluator) : '') + '</td></tr>';
+      }).join('') + '</table></div>';
+    Array.prototype.forEach.call(el.querySelectorAll('tr[data-emp]'), function (tr) {
+      tr.addEventListener('click', function () { setValIfExists('sdEmp', tr.getAttribute('data-emp')); renderFromCache(); window.scrollTo(0, 0); });
+    });
+  }
+
+  function renderFromCache() {
+    var employeeId = document.getElementById('sdEmp') && document.getElementById('sdEmp').value;
+    if (!employeeId) return;
+    var max = maxScore();
+    var note = document.getElementById('sdWeightNote');
+    var scoreEl = document.getElementById('sdScore'), saveBtn = document.getElementById('sdSave'), delBtn = document.getElementById('sdDelete');
+    if (!sdBulk) return;
+    var month = sdBulk.month, year = sdBulk.year;
+    if (note) {
+      note.innerHTML = max > 0
+        ? structureNoteHtml(weightsOf(sdBulk.weights), 'margin-top:8px;')
+        : '<div class="calloutBox amber" style="margin-top:8px;">เดือน ' + month + '/' + year + ' โครงสร้างคะแนนไม่มีส่วนการพัฒนาตัวเอง (เต็ม 0) — ไม่ต้องให้คะแนนเดือนนี้ (เริ่มใช้ตั้งแต่เดือนที่กำหนดในชีต Score_Structure) · ' + esc(structureText(weightsOf(sdBulk.weights))) + '</div>';
+    }
+    setTextIfExists('sdScoreLabel', 'คะแนนการพัฒนาตัวเอง (0-' + max + ')');
+    if (scoreEl) { scoreEl.max = String(max); scoreEl.disabled = !(max > 0); }
+    if (saveBtn) saveBtn.disabled = !(max > 0);
+    var d = sdBulk.detail[employeeId];
+    if (max > 0 && d) {
+      setValIfExists('sdScore', d.score);
+      setValIfExists('sdEvaluator', d.evaluator);
+      setValIfExists('sdNote', d.note);
+      setTextIfExists('sdExisting', 'เคยให้คะแนนไว้แล้ว โดย ' + d.evaluator + (d.evalDate ? (' เมื่อ ' + fmtDate(d.evalDate)) : '') + ' — แก้แล้วกดบันทึกซ้ำได้');
+      if (delBtn) { delBtn.style.display = ''; delBtn.disabled = false; }
+    } else {
+      setValIfExists('sdScore', ''); setValIfExists('sdNote', '');
+      setValIfExists('sdEvaluator', _lastSelfDevEvaluator);
+      setTextIfExists('sdExisting', max > 0 ? 'ยังไม่ได้ให้คะแนนเดือนนี้' : '');
+      if (delBtn) delBtn.style.display = 'none';
+    }
+    renderSummary();
+  }
+
+  // forMonth/forYear: ใช้ตอนโหลดซ้ำหลังบันทึก/ลบ — ต้องโหลดเดือนเดียวกับที่เพิ่งบันทึกจริง (ไม่ตามช่องเลือกที่ผู้ใช้อาจเพิ่งเปลี่ยนแต่ยังไม่กด "ดู")
+  // แล้วปรับช่องเลือกให้ตรงกับข้อมูลที่แสดง กันหน้าจอโชว์ข้อมูลเดือนหนึ่งแต่ช่องเลือกเป็นอีกเดือน
+  function loadBulkThenRender(forMonth, forYear) {
+    if (forMonth && forYear) { setValIfExists('sd_m', forMonth); setValIfExists('sd_y', forYear); }
+    var month = Number(document.getElementById('sd_m').value), year = Number(document.getElementById('sd_y').value);
+    var mySeq = ++sdSeq;
+    // ระหว่างโหลดและเมื่อโหลดไม่สำเร็จ ต้องไม่ค้างข้อมูล/คะแนนของเดือนเก่าไว้ให้กดบันทึกหรือลบ (Apps Script ช้า/หมดเวลาบ่อย) — ปิดปุ่มจนกว่าจะโหลดสำเร็จ
+    // กันเคสบันทึกคะแนนผิดเดือน หรือกดบันทึกซ้ำคะแนนที่เพิ่งลบไปแล้วระหว่างรอโหลดใหม่
+    sdBulk = null;
+    var saveBtnLoading = document.getElementById('sdSave'), scoreLoading = document.getElementById('sdScore');
+    if (saveBtnLoading) saveBtnLoading.disabled = true;
+    if (scoreLoading) scoreLoading.disabled = true;
+    setTextIfExists('sdExisting', 'กำลังโหลด...');
+    var noteLoading = document.getElementById('sdWeightNote'); if (noteLoading) noteLoading.innerHTML = ''; // ไม่ค้างโครงสร้างคะแนนของเดือนเก่าไว้ข้างช่องเลือกเดือนใหม่
+    renderSummary();
+    var delBtnLoading = document.getElementById('sdDelete'); if (delBtnLoading) delBtnLoading.style.display = 'none';
+    return apiGet('selfDevBulk', { month: month, year: year }).then(function (bulk) {
+      if (!document.getElementById('sdEmp') || mySeq !== sdSeq) return; // สลับหน้าไปแล้ว หรือมีการเปลี่ยนเดือนใหม่กว่านี้ระหว่างรอโหลด
+      sdBulk = { month: month, year: year, weights: (bulk && bulk.weights) || {}, detail: (bulk && bulk.detail) || {} };
+      renderFromCache();
+    }).catch(function (e) { if (document.getElementById('sdEmp') && mySeq === sdSeq) { sdBulk = null; setTextIfExists('sdExisting', 'โหลดไม่สำเร็จ — กด "ดู" เพื่อลองใหม่ (ปุ่มบันทึกถูกปิดไว้จนกว่าจะโหลดสำเร็จ)'); setTextIfExists('sdSummary', 'โหลดไม่สำเร็จ'); toast(e.message || String(e), true); } });
+  }
+  document.getElementById('sdEmp').addEventListener('change', renderFromCache);
+  document.getElementById('sd_go').addEventListener('click', function () { loadBulkThenRender(); });
+  loadBulkThenRender();
+
+  document.getElementById('sdSave').addEventListener('click', function (evt) {
+    if (!sdBulk) { toast('ยังโหลดข้อมูลเดือนนี้ไม่เสร็จ', true); return; }
+    var max = maxScore();
+    var raw = document.getElementById('sdScore').value;
+    if (!(max > 0)) { toast('เดือนนี้โครงสร้างคะแนนไม่มีส่วนการพัฒนาตัวเอง', true); return; }
+    if (raw === '' || isNaN(Number(raw)) || Number(raw) < 0 || Number(raw) > max) { toast('คะแนนการพัฒนาตัวเอง ต้องอยู่ระหว่าง 0-' + max, true); return; }
+    var evaluator = document.getElementById('sdEvaluator').value.trim();
+    if (!evaluator) { toast('กรุณาระบุชื่อผู้ประเมิน', true); return; }
+    var payload = {
+      employeeId: document.getElementById('sdEmp').value,
+      month: sdBulk.month, year: sdBulk.year, // ใช้เดือน/ปีของข้อมูลที่โหลดมาจริง (ไม่ใช่ช่องเลือกที่อาจเพิ่งเปลี่ยนแต่ยังไม่กด "ดู") กันบันทึกผิดเดือน
+      score: raw, evaluator: evaluator, note: document.getElementById('sdNote').value
+    };
+    withButtonGuard(evt.target, function () { return apiPost('setSelfDevScore', payload); })
+      .then(function () { _lastSelfDevEvaluator = evaluator; toast('บันทึกคะแนนการพัฒนาตัวเองแล้ว — ไปดูคะแนนรวม/เงินพิเศษได้ที่ "สรุปคะแนน/เงิน"'); loadBulkThenRender(payload.month, payload.year); })
+      .catch(function (e) { toast(e.message || String(e), true); });
+  });
+
+  // "ลบคะแนนนี้" — ใช้ตอนเผลอเลือกพนักงานผิดคน (โชว์เฉพาะคนที่เคยได้คะแนนเดือนนี้แล้ว) ล้างเฉพาะคะแนนการพัฒนาตัวเองของ "คนนี้ เดือนนี้"
+  // ไม่กระทบ Work Score/Error/ขาดลามาสาย ของคนนี้เลย
+  var sdDeleteBtn = document.getElementById('sdDelete');
+  sdDeleteBtn.addEventListener('click', function () {
+    if (!sdBulk) return;
+    var employeeId = document.getElementById('sdEmp').value;
+    var emp = APP.employees.filter(function (e) { return e.id === employeeId; })[0];
+    var empLabel = emp ? emp.name : employeeId;
+    if (!confirm('ยืนยันลบคะแนนการพัฒนาตัวเองของ "' + empLabel + '" เดือน ' + sdBulk.month + '/' + sdBulk.year + ' ทิ้ง?\n\n' +
+      'ใช้ตอนเผลอเลือกพนักงานผิดคน — จะล้างเฉพาะคะแนนส่วนนี้ของคนนี้เดือนนี้กลับเป็น "ยังไม่ได้ให้คะแนน" ไม่กระทบ Work Score/Error/ขาดลามาสายเลย กู้คืนไม่ได้')) return;
+    sdDeleteBtn.disabled = true;
+    var delMonth = sdBulk.month, delYear = sdBulk.year;
+    apiPost('deleteSelfDevScore', { employeeId: employeeId, month: delMonth, year: delYear })
+      .then(function () { toast('ลบคะแนนแล้ว — เลือกพนักงานที่ถูกต้องแล้วให้คะแนนใหม่ได้เลย'); loadBulkThenRender(delMonth, delYear); })
+      .catch(function (e) { sdDeleteBtn.disabled = false; toast(e.message || String(e), true); });
+  });
+}
+
 /* ---- 9. สรุปคะแนน/เงิน ---- */
 // เรียงตามคะแนนรวมมาก→น้อยเป็นค่าเริ่มต้นเสมอ และกรองตามกลุ่มเงินพิเศษได้ (Support/Sales Field/Sales Online — ตรงกับ INCENTIVE_GROUPS ฝั่ง Backend)
 var SUMMARY_GROUP_OPTIONS = ['Support', 'Sales Field', 'Sales Online'];
@@ -1620,7 +1866,7 @@ function renderAdminSummary() {
     '<button class="btn secondary" id="csExport">⬇ ดาวน์โหลดเป็น CSV</button>' +
     '<button class="btn secondary" id="csExportPdf">⬇ ดาวน์โหลดเป็น PDF</button>' +
     '</div>' +
-    '<div class="calloutBox" style="margin-top:14px;">คอลัมน์ <b>งาน/ผิด/ขาดลามาสาย/รวม</b> คือ Performance Score เต็ม 100 · <b>ดี/รางวัล/คะแนนรวม (สีส้ม)</b> แยกต่างหากโดยสิ้นเชิง ไม่รวมกับคะแนนรวม 100 คะแนนด้านหน้า · <b>เงินพิเศษ</b> คำนวณจากคะแนนรวมเท่านั้น · <b>ค่าเสียหาย</b> (คอลัมน์ขวาสุด แยกเส้นให้เห็นชัดว่าไม่เกี่ยวกับคะแนน/เงินด้านหน้าทั้งหมด) เป็นตัวเลขแสดงผลเฉยๆ จากที่กรอกไว้ตอนบันทึกเหตุการณ์ความผิด ไม่มีผลต่อคะแนน/เงินใดๆ ทั้งสิ้น · แถวล่างสุดของตารางคือยอดรวมเงินพิเศษ/ค่าเสียหายของทุกคนที่แสดงอยู่ · ตัวเลขในวงเล็บใต้หัวคอลัมน์เงินพิเศษ/ค่าเสียหาย คือเดือนที่เงินจะออกจริง/ถูกหักจริง (เงินพิเศษ +3 เดือนจากตารางนี้ ค่าเสียหาย +1 เดือน) คำนวณอัตโนมัติตามเดือนที่เลือกดูอยู่ ไม่ต้องนับเอง · <b>เบี้ยขยัน</b> ย้ายไปดู/สรุปที่หน้า "ปฏิทินบริษัท" แทนแล้ว · พนักงานที่ลาออกแล้ว (ติ๊ก Inactive) จะยังโผล่ในตารางของ<b>เดือนที่เขายังทำงานอยู่จริง</b>พร้อมป้าย "ลาออกแล้ว" ให้เห็นคะแนน/ค่าเสียหายย้อนหลังไว้ตรวจสอบ/ปิดยอดได้ (คำนวณสดล่าสุดเสมอ) แต่คอลัมน์ <b>เงินพิเศษ</b> จะขึ้น "-" เสมอ เพราะลาออกก่อนถึงเดือนที่เงินก้อนนี้จะออกจริง จึงตัดออกจากกองไม่เข้าร่วมรับส่วนแบ่งใดๆ ทั้งสิ้น (ส่วนแบ่งที่เหลือจะตกไปอยู่กับคนที่ยัง Active ในกองแทนโดยอัตโนมัติ) เดือนที่เขาไม่ได้ทำงานแล้วจะไม่โผล่มาอีกเลย</div>' +
+    '<div class="calloutBox" style="margin-top:14px;">คอลัมน์ <b>งาน/ผิด/ขาดลามาสาย/พัฒนา/อายุงาน/รวม</b> คือ Performance Score เต็ม 100 (คะแนนเต็มของแต่ละหมวดต่างกันตามเดือน ดูกล่อง "โครงสร้างคะแนนเดือนนี้" ด้านล่าง · ช่อง <b>–</b> = เดือนนี้ไม่มีหมวดนั้น · <b>PENDING</b> = ข้อมูลของหมวดนั้นยังไม่ครบ เช่น ยังไม่ประเมิน/ยังไม่ให้คะแนนพัฒนาตัวเอง/ยังไม่กรอกวันเริ่มงาน — เอาเมาส์ชี้ดูสาเหตุ คนที่ PENDING จะยังไม่นับเข้าเงินพิเศษ) · <b>ดี/รางวัล/คะแนนรวม (สีส้ม)</b> แยกต่างหากโดยสิ้นเชิง ไม่รวมกับคะแนนรวม 100 คะแนนด้านหน้า · <b>เงินพิเศษ</b> คำนวณจากคะแนนรวมเท่านั้น · <b>ค่าเสียหาย</b> (คอลัมน์ขวาสุด แยกเส้นให้เห็นชัดว่าไม่เกี่ยวกับคะแนน/เงินด้านหน้าทั้งหมด) เป็นตัวเลขแสดงผลเฉยๆ จากที่กรอกไว้ตอนบันทึกเหตุการณ์ความผิด ไม่มีผลต่อคะแนน/เงินใดๆ ทั้งสิ้น · แถวล่างสุดของตารางคือยอดรวมเงินพิเศษ/ค่าเสียหายของทุกคนที่แสดงอยู่ · ตัวเลขในวงเล็บใต้หัวคอลัมน์เงินพิเศษ/ค่าเสียหาย คือเดือนที่เงินจะออกจริง/ถูกหักจริง (เงินพิเศษ +3 เดือนจากตารางนี้ ค่าเสียหาย +1 เดือน) คำนวณอัตโนมัติตามเดือนที่เลือกดูอยู่ ไม่ต้องนับเอง · <b>เบี้ยขยัน</b> ย้ายไปดู/สรุปที่หน้า "ปฏิทินบริษัท" แทนแล้ว · พนักงานที่ลาออกแล้ว (ติ๊ก Inactive) จะยังโผล่ในตารางของ<b>เดือนที่เขายังทำงานอยู่จริง</b>พร้อมป้าย "ลาออกแล้ว" ให้เห็นคะแนน/ค่าเสียหายย้อนหลังไว้ตรวจสอบ/ปิดยอดได้ (คำนวณสดล่าสุดเสมอ) แต่คอลัมน์ <b>เงินพิเศษ</b> จะขึ้น "-" เสมอ เพราะลาออกก่อนถึงเดือนที่เงินก้อนนี้จะออกจริง จึงตัดออกจากกองไม่เข้าร่วมรับส่วนแบ่งใดๆ ทั้งสิ้น (ส่วนแบ่งที่เหลือจะตกไปอยู่กับคนที่ยัง Active ในกองแทนโดยอัตโนมัติ) เดือนที่เขาไม่ได้ทำงานแล้วจะไม่โผล่มาอีกเลย</div>' +
     '<div id="csOverrideNote"></div></div>' +
     '<div class="card"><div id="csList" class="muted">กำลังโหลด...</div></div>';
   document.getElementById('content').innerHTML = html;
@@ -1635,9 +1881,8 @@ function renderAdminSummary() {
       var note = document.getElementById('csOverrideNote');
       var first = rows[0];
       if (note) {
-        note.innerHTML = (first && first['_weightOverridden'])
-          ? '<div class="calloutBox" style="margin-top:8px;">📌 เดือนนี้ใช้สัดส่วนคะแนนพิเศษ: Work ' + first['_workWeight'] + ' + Error ' + first['_errorWeight'] + ' + Attendance ' + first['_attendanceWeight'] + ' (ปกติ 20+60+20) — ปรับได้ที่ชีต Config</div>'
-          : '';
+        // V3: โชว์โครงสร้างคะแนนของเดือนที่ดูอยู่เสมอ (ไม่ใช่เฉพาะเดือนที่ Override) — แต่ละเดือนไม่เหมือนกัน ดูชีต Score_Structure
+        note.innerHTML = first ? structureNoteHtml(weightsOf(first)) : '';
       }
       render();
     }).catch(function (e) {
@@ -1685,17 +1930,19 @@ function renderAdminSummary() {
     var totalDamage = sumField(rows, 'ค่าความเสียหาย');
     var tableMonth = Number(document.getElementById('cs_m').value);
     var tableYear = Number(document.getElementById('cs_y').value);
+    var wt = weightsOf(rows[0]); // โครงสร้างคะแนนเดือนเดียวกันทุกแถว (Backend ส่งแนบมาทุกแถว)
+    function capNote(max) { return max > 0 ? '<span class="thNote">/' + max + '</span>' : ''; }
     var incentiveMonthNote = '(ออกเดือน' + payoutMonthLabel(3, tableMonth, tableYear) + ')';
     var damageMonthNote = '(หักเดือน' + payoutMonthLabel(1, tableMonth, tableYear) + ')';
-    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>กลุ่มเงินพิเศษ</th><th>งาน</th><th>ผิด</th><th>ขาด/ลา/สาย</th><th class="colDivider">รวม</th><th class="colDivider">ดี</th><th>รางวัล</th><th class="amberCell">คะแนนรวม</th><th class="colDivider">เงินพิเศษ<span class="thNote">' + incentiveMonthNote + '</span></th><th class="colDivider">ค่าเสียหาย<span class="thNote">' + damageMonthNote + '</span></th></tr>' +
-      rows.map(function (r) { return '<tr' + (r['สถานะ'] && r['สถานะ'] !== 'Active' ? ' class="inactiveRow"' : '') + '><td>' + nameCellHtml(r) + '</td><td>' + esc(r['แผนก']) + '</td><td>' + esc(r['กลุ่มเงินพิเศษ']) + '</td><td>' + fmtNum(r['คะแนนงาน']) + '</td><td>' + fmtNum(r['คะแนนความผิด']) + '</td><td>' + fmtNum(r['คะแนนขาดลามาสาย']) + '</td><td class="colDivider totalCell">' + fmtNum(r['คะแนนรวม']) + '</td><td class="colDivider">' + fmtNum(r['คะแนนทำความดี']) + '</td><td>' + fmtNum(r['คะแนนแจ้งรางวัล']) + '</td><td class="amberCell">' + fmtNum(r['Reward Points สะสม']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เงินพิเศษ']) + '</td><td class="colDivider">' + damageCellHtml(r['ค่าความเสียหาย']) + '</td></tr>'; }).join('') +
-      '<tr class="totalsRow"><td colspan="10">รวมทั้งหมด (' + rows.length + ' คน)</td><td class="colDivider">' + fmtNum(totalIncentive) + '</td><td class="colDivider">' + damageCellHtml(totalDamage) + '</td></tr>' +
+    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>กลุ่มเงินพิเศษ</th><th>งาน' + capNote(wt.work) + '</th><th>ผิด' + capNote(wt.error) + '</th><th>ขาด/ลา/สาย' + capNote(wt.att) + '</th><th>พัฒนา' + capNote(wt.selfDev) + '</th><th>อายุงาน' + capNote(wt.tenure) + '</th><th class="colDivider">รวม' + capNote(wt.total) + '</th><th class="colDivider">ดี</th><th>รางวัล</th><th class="amberCell">คะแนนรวม</th><th class="colDivider">เงินพิเศษ<span class="thNote">' + incentiveMonthNote + '</span></th><th class="colDivider">ค่าเสียหาย<span class="thNote">' + damageMonthNote + '</span></th></tr>' +
+      rows.map(function (r) { return '<tr' + (r['สถานะ'] && r['สถานะ'] !== 'Active' ? ' class="inactiveRow"' : '') + '><td>' + nameCellHtml(r) + '</td><td>' + esc(r['แผนก']) + '</td><td>' + esc(r['กลุ่มเงินพิเศษ']) + '</td><td>' + compCellHtml(r['คะแนนงาน'], wt.work) + '</td><td>' + compCellHtml(r['คะแนนความผิด'], wt.error) + '</td><td>' + compCellHtml(r['คะแนนขาดลามาสาย'], wt.att) + '</td><td>' + compCellHtml(r['คะแนนพัฒนาตัวเอง'], wt.selfDev) + '</td><td>' + compCellHtml(r['คะแนนอายุงาน'], wt.tenure) + '</td><td class="colDivider totalCell">' + pendingBlockHtml(r['คะแนนรวม']) + '</td><td class="colDivider">' + fmtNum(r['คะแนนทำความดี']) + '</td><td>' + fmtNum(r['คะแนนแจ้งรางวัล']) + '</td><td class="amberCell">' + fmtNum(r['Reward Points สะสม']) + '</td><td class="colDivider moneyCell">' + fmtNum(r['เงินพิเศษ']) + '</td><td class="colDivider">' + damageCellHtml(r['ค่าความเสียหาย']) + '</td></tr>'; }).join('') +
+      '<tr class="totalsRow"><td colspan="12">รวมทั้งหมด (' + rows.length + ' คน)</td><td class="colDivider">' + fmtNum(totalIncentive) + '</td><td class="colDivider">' + damageCellHtml(totalDamage) + '</td></tr>' +
       '</table></div>';
   }
   document.getElementById('csExport').addEventListener('click', function () {
     var rows = filteredSortedRows();
     if (!rows.length) { toast('ไม่มีข้อมูลให้ดาวน์โหลด', true); return; }
-    var cols = ['รหัสพนักงาน', 'ชื่อพนักงาน', 'สถานะ', 'แผนก', 'กลุ่มเงินพิเศษ', 'คะแนนงาน', 'คะแนนความผิด', 'คะแนนขาดลามาสาย', 'คะแนนรวม', 'คะแนนทำความดี', 'คะแนนแจ้งรางวัล', 'Reward Points สะสม', 'เงินพิเศษ', 'ค่าความเสียหาย'];
+    var cols = ['รหัสพนักงาน', 'ชื่อพนักงาน', 'สถานะ', 'แผนก', 'กลุ่มเงินพิเศษ', 'คะแนนงาน', 'คะแนนความผิด', 'คะแนนขาดลามาสาย', 'คะแนนพัฒนาตัวเอง', 'คะแนนอายุงาน', 'คะแนนรวม', 'คะแนนทำความดี', 'คะแนนแจ้งรางวัล', 'Reward Points สะสม', 'เงินพิเศษ', 'ค่าความเสียหาย'];
     var csv = cols.join(',') + '\n' + rows.map(function (r) {
       return cols.map(function (c) {
         var v = r[c];
@@ -1793,11 +2040,11 @@ function renderAdminAnnualSummary() {
   }
 
   var html =
-    '<div class="card"><h3>📈 สรุปรายปี</h3><div class="cardSubtitle">คะแนนรวม Performance (งาน+ผิด+ขาดลามาสาย เต็ม 100/เดือน) เฉลี่ยของเดือนที่เลือก + อายุงาน — ใช้ประกอบการตัดสินใจขึ้นเงินเดือน/ให้โบนัสประจำปีเอง ระบบไม่มีสูตรแปลงเป็น % ขึ้นเงินเดือน/บาทโบนัสอัตโนมัติ</div>' +
+    '<div class="card"><h3>📈 สรุปรายปี</h3><div class="cardSubtitle">คะแนนรวม Performance (เต็ม 100/เดือน — คะแนนเต็มของแต่ละหมวดต่างกันตามเดือน ดูกล่อง "โครงสร้างคะแนนเดือนนี้" ในหน้า "สรุปคะแนน/เงิน") เฉลี่ยของเดือนที่เลือก + อายุงาน — ใช้ประกอบการตัดสินใจขึ้นเงินเดือน/ให้โบนัสประจำปีเอง ระบบไม่มีสูตรแปลงเป็น % ขึ้นเงินเดือน/บาทโบนัสอัตโนมัติ</div>' +
     '<div class="row"><div><label>จากเดือน/ปี</label>' + miniYearMonthSelectHtml('asFrom', 1, APP.year) + '</div>' +
     '<div><label>ถึงเดือน/ปี</label>' + miniYearMonthSelectHtml('asTo', APP.month, APP.year) + '</div></div>' +
     '<button class="btn" id="as_go" style="margin-top:10px;">ดูสรุป</button>' +
-    '<div class="calloutBox mt0" style="margin-top:14px;">คอลัมน์ <b>คะแนนเฉลี่ย</b> = ค่าเฉลี่ย "คะแนนรวม" ของเดือนที่ <b>นับได้</b> เท่านั้น (เดือนที่ยังไม่ประเมิน Work Score เดือนนั้นเป็น PENDING จะไม่ถูกนับเข้าค่าเฉลี่ย แต่โชว์คอลัมน์ "นับได้" ให้เห็นว่านับได้กี่เดือนจากกี่เดือนที่เลือก กันเข้าใจผิดว่าข้อมูลครบแล้ว) · <b>อายุงาน</b> คำนวณ ณ วันสุดท้ายของเดือน "ถึง" ที่เลือก จากคอลัมน์ "วันเริ่มงาน" ในชีต Employees (กรอกเองทีละคนตรงในชีตเลย ไม่มีฟอร์มเว็บให้กรอก) คนที่ยังไม่กรอกจะโชว์ "ยังไม่กรอกวันเริ่มงาน" ตรงไปตรงมา · ไม่รวมเบี้ยขยัน/เงินพิเศษ/Reward Points เพราะเป็นเงินคนละก้อนกันอยู่แล้ว ดูที่หน้า "สรุปคะแนน/เงิน"/"ปฏิทินบริษัท" แทน · พนักงานลาออกแล้วที่มีข้อมูลจริงอยู่ในช่วงที่เลือกจะยังโผล่ในตารางพร้อมป้าย "ลาออกแล้ว" ให้เห็นไว้อ้างอิง</div>' +
+    '<div class="calloutBox mt0" style="margin-top:14px;">คอลัมน์ <b>คะแนนเฉลี่ย</b> = ค่าเฉลี่ย "คะแนนรวม" ของเดือนที่ <b>นับได้</b> เท่านั้น (เดือนที่ยังเป็น PENDING — ยังไม่ประเมิน Work Score / ยังไม่ให้คะแนนพัฒนาตัวเอง / ยังไม่กรอกวันเริ่มงาน — จะไม่ถูกนับเข้าค่าเฉลี่ย แต่โชว์คอลัมน์ "นับได้" ให้เห็นว่านับได้กี่เดือนจากกี่เดือนที่เลือก กันเข้าใจผิดว่าข้อมูลครบแล้ว) · <b>อายุงาน</b> คำนวณ ณ วันสุดท้ายของเดือน "ถึง" ที่เลือก จากคอลัมน์ "วันเริ่มงาน" ในชีต Employees (กรอกเองทีละคนตรงในชีตเลย ไม่มีฟอร์มเว็บให้กรอก — ตอนนี้ข้อมูลนี้ใช้คิดคะแนนอายุงานรายเดือนด้วย ถ้าไม่กรอกคะแนนรวมของเดือนที่มีหมวดอายุงานจะเป็น PENDING) คนที่ยังไม่กรอกจะโชว์ "ยังไม่กรอกวันเริ่มงาน" ตรงไปตรงมา · ไม่รวมเบี้ยขยัน/เงินพิเศษ/Reward Points เพราะเป็นเงินคนละก้อนกันอยู่แล้ว ดูที่หน้า "สรุปคะแนน/เงิน"/"ปฏิทินบริษัท" แทน · พนักงานลาออกแล้วที่มีข้อมูลจริงอยู่ในช่วงที่เลือกจะยังโผล่ในตารางพร้อมป้าย "ลาออกแล้ว" ให้เห็นไว้อ้างอิง</div>' +
     '</div>' +
     '<div class="card"><div id="asList" class="muted">กำลังโหลด...</div></div>' +
     '<div class="card"><h3>🗓 ขาด ลา มาสาย ตามช่วงที่เลือก</h3><div class="cardSubtitle">ตารางสรุปขาด/ลา/มาสายรายคนของ "ช่วงเดือน" ด้านบน (เหมือนชีตสรุปรายปีใน Excel) — ตัวเลขชุดเดียวกับที่ใช้คิดคะแนนขาดลามาสายและเบี้ยขยันของแต่ละเดือน</div>' +
@@ -2039,11 +2286,22 @@ function renderAdminEmployees() {
   function render(rows) {
     var el = document.getElementById('empMgmtList');
     if (!rows.length) { el.innerHTML = '<div class="muted">ไม่มีข้อมูลพนักงาน</div>'; return; }
-    el.innerHTML = '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>สถานะ</th><th>วันเริ่มงาน</th><th>กลุ่มเงินพิเศษ</th><th>มีสิทธิ์รับเงินพิเศษ</th><th>เริ่มมีสิทธิ์ตั้งแต่</th><th></th></tr>' +
+    // V3: เตือนคนที่ยังไม่มี/กรอกวันเริ่มงานผิด (เฉพาะ Active) — ถ้าไม่แก้ คะแนนรวมของเดือนที่มีหมวดอายุงาน (ส.ค. 2026 เป็นต้นไป) จะเป็น PENDING และไม่นับเข้าเงินพิเศษ
+    var badHire = rows.filter(function (r) { return r.status === 'Active' && r.hireDateStatus && r.hireDateStatus !== 'ok'; });
+    var hireWarnHtml = badHire.length
+      ? '<div class="calloutBox amber" style="margin-bottom:12px;">⚠️ <b>' + badHire.length + ' คนยังไม่มี/กรอกวันเริ่มงานไม่ถูกต้อง</b>: ' + badHire.map(function (r) { return esc(r.nickname || r.fullName); }).join(', ') +
+        ' — ไปพิมพ์ "วันเริ่มงาน" ในชีต Employees เป็นปี <b>ค.ศ.</b> แบบ 2023-03-15 (ห้ามปี พ.ศ.) ก่อน ไม่งั้นคะแนนรวมของเดือนที่มีหมวด "อายุงาน" ของคนเหล่านี้จะเป็น PENDING และยังไม่นับเข้าเงินพิเศษ</div>'
+      : '';
+    el.innerHTML = hireWarnHtml + '<div style="overflow-x:auto"><table class="simple"><tr><th>ชื่อ</th><th>แผนก</th><th>สถานะ</th><th>วันเริ่มงาน</th><th>กลุ่มเงินพิเศษ</th><th>มีสิทธิ์รับเงินพิเศษ</th><th>เริ่มมีสิทธิ์ตั้งแต่</th><th></th></tr>' +
       rows.map(function (r) {
         // "วันเริ่มงาน" แสดงผลอย่างเดียว (ดูอย่างเดียวในหน้านี้ ไว้ตรวจว่ากรอกครบหรือยัง) — ใช้คำนวณอายุงานในหน้า "สรุปรายปี"
         // แก้ค่าต้องพิมพ์ตรงในชีต Employees เอง ตามที่ยืนยันแล้ว (ไม่มีฟอร์มเว็บให้แก้จุดนี้โดยเจตนา)
-        var hireDateCell = r.hireDate ? esc(fmtDate(r.hireDate)) : '<span class="muted">ยังไม่กรอก</span>';
+        // V3: วันเริ่มงานใช้คิดคะแนนอายุงานรายเดือนด้วยแล้ว — Backend ส่ง hireDateStatus มาบอกว่าอ่านได้ไหม (ok/missing/unreadable/future)
+        var hireDateCell;
+        if (r.hireDateStatus === 'missing' || (!r.hireDateStatus && !r.hireDate)) hireDateCell = '<span style="color:#c0392b;font-weight:700;">ยังไม่กรอก</span>';
+        else if (r.hireDateStatus === 'unreadable') hireDateCell = '<span style="color:#c0392b;font-weight:700;" title="อ่านเป็นวันที่ไม่ได้ หรือเป็นปีก่อน ค.ศ. 1990 (มักเกิดจากพิมพ์ปี 2 หลัก/ปี พ.ศ.) — พิมพ์เป็น ปี ค.ศ. 4 หลัก เช่น 2023-03-15">อ่านไม่ออก: ' + esc(fmtDate(r.hireDate)) + '</span>';
+        else if (r.hireDateStatus === 'future') hireDateCell = '<span style="color:#c0392b;font-weight:700;" title="เป็นวันในอนาคต — มักพิมพ์ปี พ.ศ. แทน ค.ศ.">⚠ ' + esc(fmtDate(r.hireDate)) + ' (อนาคต?)</span>';
+        else hireDateCell = esc(fmtDate(r.hireDate));
         return '<tr data-emp-id="' + esc(r.id) + '">' +
           '<td>' + esc(r.nickname) + ' (' + esc(r.fullName) + ')</td>' +
           '<td>' + esc(r.department) + '</td>' +
