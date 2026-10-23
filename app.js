@@ -1428,14 +1428,14 @@ function renderAdminCalendar() {
 }
 
 /* ---- 8. ประเมิน Work Score (PHASE 2 — A ผลงาน 10 + B คุณภาพ 6 + C ความร่วมมือ 4 = เต็ม 20) ---- */
-// พนักงานแผนก Support & Strategy (Business Operations Lead) ไม่ให้เลือกในนี้ — มีระบบประเมินแยกต่างหากตามที่สั่ง
+// ทุกแผนกรวมถึง Support & Strategy (กิ๊ฟ) เลือกประเมินได้ด้วยเกณฑ์เดียวกัน (เดิมตัดแผนกนี้ออก ยกเลิกแล้วตามที่พี่สั่ง)
 // Work Score V2 (รวมหน้า): พี่ขอให้กรอกยอด Sales Field/Online "รวมอยู่ในหน้าเดียวกัน" กับการประเมิน Work Score เลย ไม่ต้องสลับแท็บ
 // เลือกพนักงานแผนกไหน แพทเทิร์นการกรอกก็ต่างกันไปอัตโนมัติ (เซลส์วิ่ง/เซลส์ออนไลน์ = มีการ์ดกรอกยอดเดือนนี้โผล่ขึ้นมาก่อน
 // แผนกอื่น = ไม่มีการ์ดนี้ ข้ามไปกรอกคะแนน A/B/C ตรงๆ เหมือนเดิม) — แท็บ "Sales Field"/"Sales Online" แยกต่างหากถูกลบออกไปแล้ว
 // ตามที่พี่ขอ (ไม่ต้องการให้กรอกข้อมูลชุดเดียวกันได้จาก 2 ที่) การ์ดนี้ในหน้า Work Score จึงเป็นจุดเดียวที่กรอกยอดขายรายเดือน
 // ของเซลส์วิ่ง/เซลส์ออนไลน์ได้แล้วทั้งระบบ (ไม่มีตารางสรุปยอดรวมทุกคนพร้อมกันอีกต่อไป ต้องเลือกดูทีละคนจากตรงนี้)
 function renderAdminWorkScore() {
-  var eligible = APP.employees.filter(function (e) { return e.department !== 'Support & Strategy'; });
+  var eligible = APP.employees.slice(); // ทุกแผนก รวม Support & Strategy (กิ๊ฟ) — เดิมตัดแผนกนี้ออก ยกเลิกแล้วตามที่พี่สั่ง
   var html =
     '<div class="card"><h3>🎯 Performance Evaluation</h3><div class="cardSubtitle">ประเมิน Work Score เต็ม 20 — ฉันเป็นผู้ประเมินให้ทุกคนโดยตรง ไม่มีการประเมินตนเองหรือเฉลี่ยจากลูกทีม</div>' +
     monthPickerHtml('ws', APP.month, APP.year) +
@@ -1713,10 +1713,10 @@ function renderAdminWorkScore() {
 // แพทเทิร์นเดียวกับหน้า Work Score: โหลดข้อมูล "ทั้งเดือน ทุกคน" ครั้งเดียว (action selfDevBulk) แล้วสลับพนักงานจากแคชในเครื่อง ไม่ยิง Server
 // ตอนสลับคน — คะแนนเต็มของเดือน (ปัจจุบัน 10) อ่านจาก Backend ทุกครั้งไม่ Hardcode เดือนที่โครงสร้างไม่มีส่วนนี้ (เต็ม 0 เช่น ก.ย./ส.ค. 2026)
 // หน้านี้จะไม่ให้กรอก (Backend ก็ปฏิเสธอีกชั้น) มีตาราง "สรุปเดือนนี้" ให้เห็นว่าใครให้แล้ว/ยัง กดแถวเพื่อเลือกคนนั้นกรอกต่อได้เลย
-// พนักงานแผนก Support & Strategy ไม่รวมในระบบนี้ (เหมือน Work Score — มีระบบประเมินแยกต่างหาก)
+// ทุกแผนกรวมถึง Support & Strategy เลือกให้คะแนนได้ (เหมือน Work Score)
 var _lastSelfDevEvaluator = ''; // จำชื่อผู้ประเมินล่าสุดไว้ในหน้าเว็บ (ในหน่วยความจำเท่านั้น) ไม่ต้องพิมพ์ใหม่ทุกคน
 function renderAdminSelfDev() {
-  var eligible = APP.employees.filter(function (e) { return e.department !== 'Support & Strategy'; });
+  var eligible = APP.employees.slice(); // ทุกแผนก รวม Support & Strategy (กิ๊ฟ) — เดิมตัดแผนกนี้ออก ยกเลิกแล้วตามที่พี่สั่ง
   var html =
     '<div class="card"><h3>🌱 คะแนนการพัฒนาตัวเอง</h3><div class="cardSubtitle">พี่ให้คะแนนเองทุกเดือน (เหมือน Work Score) — ใช้เมื่อโครงสร้างคะแนนของเดือนนั้นมีส่วนนี้ (ตอนนี้เริ่มตั้งแต่ ต.ค. 2026 เต็ม 10)</div>' +
     monthPickerHtml('sd', APP.month, APP.year) +
