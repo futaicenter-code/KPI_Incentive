@@ -112,14 +112,8 @@ function withButtonGuard(btn, action) {
 
 /* ===================== state ทั่วไป ===================== */
 
-function getInitialMode() {
-  try {
-    var params = new URLSearchParams(window.location.search);
-    return params.get('mode') === 'admin' ? 'admin' : 'employee';
-  } catch (e) {
-    return (window.location.search || '').indexOf('mode=admin') !== -1 ? 'admin' : 'employee';
-  }
-}
+// เหลือโหมดเดียวคือผู้ดูแลระบบ (ถอดโหมดพนักงาน/หน้าบันทึกงานออกแล้ว) — เปิดเว็บมาจะเจอหน้ากรอกรหัสผ่านเลย ไม่ต้องใส่ ?mode=admin
+function getInitialMode() { return 'admin'; }
 
 var APP = { mode: getInitialMode(), employees: [], departments: [], errorTypes: [], severityLevels: [], impactOptions: [], workTypesByDept: {}, attendanceStatuses: [], leaveTypes: [], reportRewardDefaults: { self: null, external: null }, goodDeedPoints: null, month: null, year: null, tab: null, adminUnlocked: false };
 
@@ -294,186 +288,25 @@ function showBootError(e) {
   if (el) el.innerHTML = '<div class="card"><h3>โหลดไม่สำเร็จ</h3><p class="muted">' + esc((e && e.message) || e) + '</p><button class="btn secondary" onclick="boot()">ลองใหม่อีกครั้ง</button></div>';
 }
 
-// ข้อความทักทายเปลี่ยนตามช่วงเวลา — ตกแต่ง UI เท่านั้น ไม่มีผลต่อข้อมูล/Logic ใดๆ
-function greetingText() {
-  var h = new Date().getHours();
-  var g = h < 12 ? 'สวัสดีตอนเช้า' : (h < 17 ? 'สวัสดีตอนบ่าย' : 'สวัสดีตอนเย็น');
-  return g + ' 👋 วันนี้ทำงานเป็นอย่างไรบ้าง?';
-}
-
 function renderShell() {
   var titleEl = document.getElementById('headerTitle');
   var subtitleEl = document.getElementById('headerSubtitle');
   var toggleEl = document.getElementById('modeToggle');
-  if (APP.mode === 'admin') {
-    titleEl.textContent = 'FUTAI Performance';
-    subtitleEl.textContent = 'โหมดผู้ดูแลระบบ';
-    toggleEl.textContent = 'โหมดพนักงาน';
-    toggleEl.onclick = function () { APP.mode = 'employee'; renderShell(); };
-    if (APP.adminUnlocked || isAdminUnlockedThisTab()) {
-      APP.adminUnlocked = true;
-      setupAdminTabs();
-    } else {
-      document.getElementById('tabbar').style.display = 'none';
-      document.getElementById('tabbar').innerHTML = '';
-      renderAdminPasswordGate();
-    }
+  titleEl.textContent = 'FUTAI Performance';
+  subtitleEl.textContent = 'โหมดผู้ดูแลระบบ';
+  if (toggleEl) { toggleEl.style.display = 'none'; toggleEl.onclick = null; } // ไม่มีโหมดพนักงานให้สลับแล้ว
+  APP.mode = 'admin';
+  if (APP.adminUnlocked || isAdminUnlockedThisTab()) {
+    APP.adminUnlocked = true;
+    setupAdminTabs();
   } else {
-    titleEl.textContent = 'FUTAI';
-    subtitleEl.textContent = greetingText();
-    toggleEl.textContent = 'สำหรับผู้ดูแลระบบ';
-    toggleEl.onclick = function () { APP.mode = 'admin'; renderShell(); };
     document.getElementById('tabbar').style.display = 'none';
     document.getElementById('tabbar').innerHTML = '';
-    renderEmployeeHome();
+    renderAdminPasswordGate();
   }
 }
 
-/* ===================== EMPLOYEE MODE (ไม่มี Login) ===================== */
-function renderEmployeeHome() {
-  var html = '<div class="card"><h3>👋 บันทึกงาน</h3><div class="cardSubtitle">เลือกชื่อของคุณเพื่อเริ่มบันทึกงานวันนี้</div>' +
-    '<label>เลือกชื่อพนักงาน</label><select id="empSelect"><option value="">— เลือกชื่อ —</option>' + employeeOptions(APP.employees) + '</select>' +
-    '<div id="deptLine" class="muted" style="margin-top:6px;"></div>' +
-    '</div>' +
-    '<div id="empFormArea"></div>' +
-    '<div id="empHistoryArea"></div>';
-  document.getElementById('content').innerHTML = html;
-  document.getElementById('empSelect').addEventListener('change', function () {
-    var emp = APP.employees.filter(function (e) { return e.id === this.value; }, this)[0];
-    if (!emp) { document.getElementById('deptLine').textContent = ''; document.getElementById('empFormArea').innerHTML = ''; document.getElementById('empHistoryArea').innerHTML = ''; return; }
-    document.getElementById('deptLine').innerHTML = 'แผนก: <span class="pill">' + esc(emp.department) + '</span>';
-    renderEmployeeForm(emp);
-  });
-}
-
-function renderEmployeeForm(emp) {
-  var area = document.getElementById('empFormArea');
-  var hist = document.getElementById('empHistoryArea');
-
-  if (emp.formType === 'daily') {
-    area.innerHTML = dailyFormHtml('e', emp.department);
-    wireDailyForm('e', emp.id);
-    hist.innerHTML = '<div class="card"><h3>ประวัติงานของฉัน</h3><div id="e_hist" class="muted">กำลังโหลด...</div></div>';
-    loadDailyHistory('e', emp.id);
-  } else if (emp.formType === 'weekly') {
-    area.innerHTML = weeklyFormHtml('e');
-    wireWeeklyForm('e', emp.id, function () { loadWeeklyHistory('e', emp.id); });
-    hist.innerHTML = '<div class="card"><h3>ประวัติงานของฉัน (รายสัปดาห์)</h3><div id="e_whist" class="muted">กำลังโหลด...</div></div>';
-    loadWeeklyHistory('e', emp.id);
-  } else {
-    area.innerHTML = '<div class="card muted">งานของแผนกนี้ Admin เป็นผู้บันทึกให้ ไม่ต้องกรอกเองครับ</div>';
-    hist.innerHTML = '';
-  }
-}
-
-/* ---- Daily form (ใช้ทั้งฝั่งพนักงานและฝั่ง Admin บันทึกแทน) ---- */
-// ประเภทงานเป็น Dropdown ตามแผนก (มาจาก Work_Type_Config ผ่าน Bootstrap) แก้ไข/เพิ่มรายการได้ที่ Sheet โดยตรง
-// เลือก "อื่นๆ" ได้เสมอ — กรณีนั้นให้ระบุรายละเอียดในช่องหมายเหตุ
-function workTypeOptionsForDept(dept) {
-  var list = (APP.workTypesByDept && APP.workTypesByDept[dept]) || [];
-  var opts = list.map(function (t) { return '<option value="' + esc(t.label) + '">' + esc(t.label) + '</option>'; }).join('');
-  if (list.every(function (t) { return t.label !== 'งานอื่น' && t.label !== 'อื่นๆ'; })) opts += '<option value="อื่นๆ">อื่นๆ</option>';
-  return opts;
-}
-
-function dailyFormHtml(prefix, dept) {
-  return '<div class="card"><h3>📝 บันทึกงานวันนี้</h3>' +
-    '<label>วันที่</label><input type="date" id="' + prefix + '_date" value="' + todayStr() + '">' +
-    '<label>ประเภทงาน</label><select id="' + prefix + '_task">' + workTypeOptionsForDept(dept) + '</select>' +
-    '<div class="row"><div><label>จำนวน</label><input type="number" id="' + prefix + '_qty"></div><div><label>หน่วย</label><input type="text" id="' + prefix + '_unit" placeholder="รายการ / เจ้า / ชิ้น"></div></div>' +
-    '<label>หมายเหตุ <span class="muted">(ถ้าเลือก "อื่นๆ" กรุณาระบุรายละเอียดตรงนี้)</span></label><input type="text" id="' + prefix + '_note">' +
-    '<button class="btn secondary" id="' + prefix + '_add">+ เพิ่มในรายการวันนี้</button>' +
-    '<div id="' + prefix + '_pending" style="margin-top:10px;"></div>' +
-    '<button class="btn" id="' + prefix + '_saveAll" style="display:none;">บันทึกทั้งหมด</button>' +
-    '</div>';
-}
-
-function wireDailyForm(prefix, employeeId) {
-  var pending = [];
-  function renderPending() {
-    var el = document.getElementById(prefix + '_pending');
-    el.innerHTML = pending.map(function (l, i) {
-      return '<div class="lineItem"><span>' + esc(l.task) + (l.qty ? ' (' + esc(l.qty) + ' ' + esc(l.unit) + ')' : '') + '</span><button data-i="' + i + '">ลบ</button></div>';
-    }).join('');
-    Array.prototype.forEach.call(el.querySelectorAll('button'), function (b) {
-      b.addEventListener('click', function () { pending.splice(Number(b.getAttribute('data-i')), 1); renderPending(); });
-    });
-    document.getElementById(prefix + '_saveAll').style.display = pending.length ? 'inline-block' : 'none';
-  }
-  document.getElementById(prefix + '_add').addEventListener('click', function () {
-    var taskSel = document.getElementById(prefix + '_task');
-    var task = taskSel.value;
-    var note = document.getElementById(prefix + '_note').value;
-    if (!task) { toast('เลือกประเภทงานก่อน', true); return; }
-    if ((task === 'อื่นๆ') && !note.trim()) { toast('เลือก "อื่นๆ" แล้วกรุณาระบุรายละเอียดในหมายเหตุด้วย', true); return; }
-    pending.push({ task: task, qty: document.getElementById(prefix + '_qty').value, unit: document.getElementById(prefix + '_unit').value, note: note });
-    taskSel.selectedIndex = 0; document.getElementById(prefix + '_qty').value = ''; document.getElementById(prefix + '_unit').value = ''; document.getElementById(prefix + '_note').value = '';
-    renderPending();
-  });
-  document.getElementById(prefix + '_saveAll').addEventListener('click', function (evt) {
-    var date = document.getElementById(prefix + '_date').value;
-    var linesToSave = pending;
-    withButtonGuard(evt.target, function () { return apiPost('addWorkLogBatch', { employeeId: employeeId, date: date, lines: linesToSave }); })
-      .then(function () {
-        toast('บันทึกแล้ว ' + linesToSave.length + ' รายการ'); pending = []; renderPending();
-        if (document.getElementById(prefix + '_hist')) loadDailyHistory(prefix, employeeId);
-      }).catch(function (e) { toast(e.message || String(e), true); });
-  });
-}
-
-function loadDailyHistory(prefix, employeeId) {
-  apiGet('workHistory', { employeeId: employeeId, limit: 20 }).then(function (rows) {
-    var el = document.getElementById(prefix + '_hist');
-    if (!el) return;
-    if (!rows.length) { el.innerHTML = '<div class="muted">ยังไม่มีข้อมูล</div>'; return; }
-    el.innerHTML = rows.map(function (r) {
-      return '<div class="list-item"><b>' + esc(r['งานที่ทำ']) + '</b> ' + (r['จำนวน'] ? '(' + esc(r['จำนวน']) + ' ' + esc(r['หน่วย']) + ')' : '') + '<div class="meta">' + fmtDate(r['วันที่']) + (r['หมายเหตุ'] ? ' · ' + esc(r['หมายเหตุ']) : '') + '</div></div>';
-    }).join('');
-  }).catch(function (e) {
-    var el = document.getElementById(prefix + '_hist');
-    if (el) el.innerHTML = '<div class="muted">โหลดประวัติไม่สำเร็จ: ' + esc(e.message || e) + '</div>';
-  });
-}
-
-/* ---- Weekly form (Accounting) ---- */
-function weeklyFormHtml(prefix) {
-  return '<div class="card"><h3>📅 บันทึกงานประจำสัปดาห์ (บัญชี)</h3>' +
-    '<div class="row"><div><label>วันที่เริ่มสัปดาห์</label><input type="date" id="' + prefix + '_wstart"></div><div><label>วันที่สิ้นสุดสัปดาห์</label><input type="date" id="' + prefix + '_wend"></div></div>' +
-    '<div class="row"><div><label>วางบิล (จำนวน)</label><input type="number" id="' + prefix + '_invoice"></div><div><label>รับชำระ (จำนวน)</label><input type="number" id="' + prefix + '_payment"></div></div>' +
-    '<div class="row"><div><label>ตรวจเอกสาร (จำนวน)</label><input type="number" id="' + prefix + '_doccheck"></div><div><label>เปิดบิล (จำนวน)</label><input type="number" id="' + prefix + '_billopen"></div></div>' +
-    '<label>งานอื่นๆ</label><textarea id="' + prefix + '_other"></textarea>' +
-    '<button class="btn" id="' + prefix + '_wsave">บันทึก</button></div>';
-}
-
-function wireWeeklyForm(prefix, employeeId, onSaved) {
-  document.getElementById(prefix + '_wsave').addEventListener('click', function (evt) {
-    var start = document.getElementById(prefix + '_wstart').value, end = document.getElementById(prefix + '_wend').value;
-    if (!start || !end) { toast('เลือกช่วงวันที่ก่อน', true); return; }
-    var payload = {
-      employeeId: employeeId, startDate: start, endDate: end,
-      invoiceCount: document.getElementById(prefix + '_invoice').value, paymentCount: document.getElementById(prefix + '_payment').value,
-      docCheckCount: document.getElementById(prefix + '_doccheck').value, billOpenCount: document.getElementById(prefix + '_billopen').value,
-      otherWork: document.getElementById(prefix + '_other').value
-    };
-    withButtonGuard(evt.target, function () { return apiPost('addWeeklyLog', payload); })
-      .then(function () { toast('บันทึกแล้ว'); if (onSaved) onSaved(); }).catch(function (e) { toast(e.message || String(e), true); });
-  });
-}
-
-function loadWeeklyHistory(prefix, employeeId) {
-  apiGet('weeklyHistory', { employeeId: employeeId, limit: 15 }).then(function (rows) {
-    var el = document.getElementById(prefix + '_whist');
-    if (!el) return;
-    if (!rows.length) { el.innerHTML = '<div class="muted">ยังไม่มีข้อมูล</div>'; return; }
-    el.innerHTML = rows.map(function (r) {
-      return '<div class="list-item"><b>' + fmtDate(r['วันที่เริ่มสัปดาห์']) + ' - ' + fmtDate(r['วันที่สิ้นสุดสัปดาห์']) + '</b>' +
-        '<div class="meta">วางบิล ' + fmtNum(r['วางบิล']) + ' · รับชำระ ' + fmtNum(r['รับชำระ']) + ' · ตรวจเอกสาร ' + fmtNum(r['ตรวจเอกสาร']) + ' · เปิดบิล ' + fmtNum(r['เปิดบิล']) + (r['งานอื่นๆ'] ? ' · ' + esc(r['งานอื่นๆ']) : '') + '</div></div>';
-    }).join('');
-  }).catch(function (e) {
-    var el = document.getElementById(prefix + '_whist');
-    if (el) el.innerHTML = '<div class="muted">โหลดประวัติไม่สำเร็จ: ' + esc(e.message || e) + '</div>';
-  });
-}
+/* (เดิมมี "โหมดพนักงาน" หน้าบันทึกงานประจำวัน/ประจำสัปดาห์ตรงนี้ — ถอดออกแล้วตามที่พี่สั่ง เหลือเฉพาะหน้าผู้ดูแลระบบ) */
 
 /* ===================== ADMIN: กล่องกรอกรหัสผ่าน (ถ้ายังไม่ตั้งรหัสใน Config จะข้ามหน้านี้ไปอัตโนมัติ) ===================== */
 function renderAdminPasswordGate() {
@@ -1443,7 +1276,7 @@ function renderAdminWorkScore() {
     '<label>พนักงาน</label><select id="wsEmp">' + employeeOptions(eligible) + '</select>' +
     '<div id="wsExisting" class="muted" style="margin:6px 0;">กำลังโหลด...</div>' +
     '<div id="wsAutoCalc" class="calloutBox mt0" style="display:none;"></div>' +
-    '<div class="calloutBox mt0">ไม่ต้องหักเพราะมาสาย/ขาด/ลา/Error — คิดแยกในคะแนนความผิด/ขาดลามาสายอยู่แล้ว ดูประวัติการทำงานประกอบได้จากแท็บ "บันทึกงาน" หรือชีต Daily_Work_Log</div></div>' +
+    '<div class="calloutBox mt0">ไม่ต้องหักเพราะมาสาย/ขาด/ลา/Error — คิดแยกในคะแนนความผิด/ขาดลามาสายอยู่แล้ว</div></div>' +
 
     '<div id="wsMonthlyArea"></div>' +
 
