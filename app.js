@@ -310,7 +310,6 @@ function renderSummaryPasswordGate(onUnlocked) {
     '<div class="cardSubtitle">หน้านี้มีรหัสผ่าน — ใส่รหัสผ่านเพื่อดูคะแนนรวมและเงินพิเศษของทุกคน</div>' +
     '<label>รหัสผ่าน</label><input type="password" id="summaryPw" autocomplete="off">' +
     '<button class="btn" id="summaryPwGo">เข้าดูหน้านี้</button>' +
-    '<p class="muted" style="margin-top:10px;">ถ้ายังไม่เคยตั้งรหัสผ่าน (Cfg_AdminPassword ในชีต Config ยังเป็น PENDING) ใส่อะไรก็เข้าได้</p>' +
     '</div>';
   document.getElementById('content').innerHTML = html;
   var goBtn = document.getElementById('summaryPwGo');
