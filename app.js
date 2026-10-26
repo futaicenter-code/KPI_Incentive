@@ -449,6 +449,15 @@ function renderAdminError() {
     '<div class="card"><h3>⚠️ บันทึกความผิด</h3><div class="cardSubtitle">บันทึกและติดตามเหตุการณ์ความผิดพลาดในการทำงาน</div>' +
     '<div id="eMonthStats" class="statGrid mt0"></div></div>' +
 
+    '<div class="card"><h3>📋 ข้อมูลเหตุการณ์</h3>' +
+    '<div id="eEditBanner" class="calloutBox amber" style="display:none;margin-bottom:12px;">✏️ กำลังแก้ไขเหตุการณ์ <b id="eEditBannerId"></b> — บันทึกจะอัปเดตรายการเดิม ไม่สร้างรายการใหม่ <button class="btn secondary small" id="eCancelEdit" style="margin-left:8px;">ยกเลิกการแก้ไข</button></div>' +
+    '<div class="row"><div><label>วันที่เกิดเหตุ</label><input type="date" id="eDate" value="' + todayStr() + '"></div>' +
+    '<div><label>แผนก (อัตโนมัติจากผู้รับผิดชอบที่เลือกด้านล่าง)</label><input type="text" id="eDept" readonly placeholder="— เลือกผู้รับผิดชอบก่อน —"></div></div>' +
+    '<div id="eScaleNote"></div>' +
+    '<label>ประเภทความผิด</label><select id="eType">' + typeOptions + '</select>' +
+    '<label>รายละเอียดเหตุการณ์</label><textarea id="eDesc"></textarea>' +
+    '<label>ค่าเสียหายจริง (บาท ถ้ามี — ไม่มีผลต่อคะแนน)</label><input type="number" id="eDamage"></div>' +
+
     '<div class="card"><h3>👥 ผู้รับผิดชอบ &amp; ผู้แจ้ง</h3><div class="cardSubtitle">ทุกคนได้คะแนนเต็มตามระดับ ไม่หารเฉลี่ย — เลือกได้แม้ผู้รับผิดชอบมาจากคนละแผนกกัน (ระบบแยกแผนกให้อัตโนมัติ ดูด้านล่าง)</div>' +
     '<label>ผู้รับผิดชอบ</label>' +
     '<div id="eRespRows"></div>' +
@@ -456,15 +465,6 @@ function renderAdminError() {
     '<label style="margin-top:18px;">ผู้แจ้งปัญหา (ถ้ามี — เว้นว่างได้ถ้าไม่มีคนแจ้งเป็นพิเศษ เช่นหัวหน้าเจอเอง)</label>' +
     '<select id="eReporter"><option value="">— ไม่มี / ไม่ระบุ —</option>' + employeeOptionsWithDept(APP.employees) + '</select>' +
     '<div class="muted" id="eReporterHint" style="display:none;"></div></div>' +
-
-    '<div class="card"><h3>📋 ข้อมูลเหตุการณ์</h3>' +
-    '<div id="eEditBanner" class="calloutBox amber" style="display:none;margin-bottom:12px;">✏️ กำลังแก้ไขเหตุการณ์ <b id="eEditBannerId"></b> — บันทึกจะอัปเดตรายการเดิม ไม่สร้างรายการใหม่ <button class="btn secondary small" id="eCancelEdit" style="margin-left:8px;">ยกเลิกการแก้ไข</button></div>' +
-    '<div class="row"><div><label>วันที่เกิดเหตุ</label><input type="date" id="eDate" value="' + todayStr() + '"></div>' +
-    '<div><label>แผนก (อัตโนมัติจากผู้รับผิดชอบที่เลือกด้านบน)</label><input type="text" id="eDept" readonly placeholder="— เลือกผู้รับผิดชอบก่อน —"></div></div>' +
-    '<div id="eScaleNote"></div>' +
-    '<label>ประเภทความผิด</label><select id="eType">' + typeOptions + '</select>' +
-    '<label>รายละเอียดเหตุการณ์</label><textarea id="eDesc"></textarea>' +
-    '<label>ค่าเสียหายจริง (บาท ถ้ามี — ไม่มีผลต่อคะแนน)</label><input type="number" id="eDamage"></div>' +
 
     '<div class="card"><h3>🎯 ผลกระทบ</h3><div class="cardSubtitle">กำหนดระดับความรุนแรงเริ่มต้นให้อัตโนมัติ</div>' +
     '<select id="eImpact" class="hiddenSelect">' + impactOptions + '</select>' + impactCardsHtml +
