@@ -117,12 +117,13 @@ function getInitialMode() { return 'admin'; }
 
 var APP = { mode: getInitialMode(), employees: [], departments: [], errorTypes: [], severityLevels: [], impactOptions: [], workTypesByDept: {}, attendanceStatuses: [], leaveTypes: [], reportRewardDefaults: { self: null, external: null }, goodDeedPoints: null, month: null, year: null, tab: null, adminUnlocked: false };
 
-// จำว่า Admin ผ่านรหัสผ่านแล้วในแท็บนี้ (sessionStorage = อยู่แค่แท็บนี้ ปิดแท็บแล้วต้องใส่ใหม่ ไม่ใช่ Login ถาวร)
-function isAdminUnlockedThisTab() {
-  try { return sessionStorage.getItem('futai_admin_unlocked') === '1'; } catch (e) { return false; }
+// จำว่าผ่านรหัสผ่านหน้า "สรุปคะแนน/เงิน" แล้วในแท็บนี้ (sessionStorage = อยู่แค่แท็บนี้ ปิดแท็บแล้วต้องใส่ใหม่)
+// รหัสผ่านเดิมที่เคยใช้เข้าโหมด Admin (Cfg_AdminPassword) ย้ายมาล็อกเฉพาะหน้านี้แทน — หน้าอื่นเข้าได้เลยไม่ต้องใส่รหัส
+function isSummaryUnlockedThisTab() {
+  try { return sessionStorage.getItem('futai_summary_unlocked') === '1'; } catch (e) { return false; }
 }
-function markAdminUnlockedThisTab() {
-  try { sessionStorage.setItem('futai_admin_unlocked', '1'); } catch (e) { /* ถ้า sessionStorage ใช้ไม่ได้ก็แค่ต้องใส่รหัสใหม่ทุกครั้ง ไม่ใช่ปัญหาคอขวด */ }
+function markSummaryUnlockedThisTab() {
+  try { sessionStorage.setItem('futai_summary_unlocked', '1'); } catch (e) { /* ถ้า sessionStorage ใช้ไม่ได้ก็แค่ต้องใส่รหัสใหม่ทุกครั้งที่เปิดหน้านี้ */ }
 }
 
 function toast(msg, isError) {
@@ -296,35 +297,35 @@ function renderShell() {
   subtitleEl.textContent = 'โหมดผู้ดูแลระบบ';
   if (toggleEl) { toggleEl.style.display = 'none'; toggleEl.onclick = null; } // ไม่มีโหมดพนักงานให้สลับแล้ว
   APP.mode = 'admin';
-  if (APP.adminUnlocked || isAdminUnlockedThisTab()) {
-    APP.adminUnlocked = true;
-    setupAdminTabs();
-  } else {
-    document.getElementById('tabbar').style.display = 'none';
-    document.getElementById('tabbar').innerHTML = '';
-    renderAdminPasswordGate();
-  }
+  setupAdminTabs(); // ไม่มีรหัสผ่านเข้าโหมด Admin แล้ว — ล็อกรหัสเฉพาะหน้า "สรุปคะแนน/เงิน" (ดู renderSummaryPasswordGate)
 }
 
 /* (เดิมมี "โหมดพนักงาน" หน้าบันทึกงานประจำวัน/ประจำสัปดาห์ตรงนี้ — ถอดออกแล้วตามที่พี่สั่ง เหลือเฉพาะหน้าผู้ดูแลระบบ) */
 
-/* ===================== ADMIN: กล่องกรอกรหัสผ่าน (ถ้ายังไม่ตั้งรหัสใน Config จะข้ามหน้านี้ไปอัตโนมัติ) ===================== */
-function renderAdminPasswordGate() {
-  var html = '<div class="card"><h3>เข้าสู่โหมด Admin</h3>' +
-    '<label>รหัสผ่าน</label><input type="text" id="adminPw" autocomplete="off">' +
-    '<button class="btn" id="adminPwGo">เข้าสู่ระบบ</button>' +
-    '<p class="muted" style="margin-top:10px;">ถ้ายังไม่เคยตั้งรหัสผ่าน (Cfg_AdminPassword ในชีต Config ยังเป็น PENDING) ใส่อะไรก็ได้แล้วกดเข้าสู่ระบบได้เลย</p>' +
+/* ===================== หน้า "สรุปคะแนน/เงิน": กล่องกรอกรหัสผ่าน ===================== */
+// ใช้รหัสผ่านตัวเดิม (Cfg_AdminPassword ในชีต Config) ตรวจผ่าน action adminAuth เดิม — ถ้ายังเป็น PENDING = ยังไม่ล็อก (ใส่อะไรก็เข้าได้)
+// หมายเหตุ: เป็นการกันคนไม่รู้รหัสไม่ให้เปิดหน้านี้ในเว็บ ไม่ใช่ระบบ Login เต็มรูปแบบ (ตามสเปกเดิมที่ตั้งไว้)
+function renderSummaryPasswordGate(onUnlocked) {
+  var html = '<div class="card"><h3>🔒 สรุปคะแนน/เงิน</h3>' +
+    '<div class="cardSubtitle">หน้านี้มีรหัสผ่าน — ใส่รหัสผ่านเพื่อดูคะแนนรวมและเงินพิเศษของทุกคน</div>' +
+    '<label>รหัสผ่าน</label><input type="password" id="summaryPw" autocomplete="off">' +
+    '<button class="btn" id="summaryPwGo">เข้าดูหน้านี้</button>' +
+    '<p class="muted" style="margin-top:10px;">ถ้ายังไม่เคยตั้งรหัสผ่าน (Cfg_AdminPassword ในชีต Config ยังเป็น PENDING) ใส่อะไรก็เข้าได้</p>' +
     '</div>';
   document.getElementById('content').innerHTML = html;
-  var goBtn = document.getElementById('adminPwGo');
+  var goBtn = document.getElementById('summaryPwGo');
   function submitPw() {
-    var pw = document.getElementById('adminPw').value;
+    var pw = document.getElementById('summaryPw').value;
     withButtonGuard(goBtn, function () { return apiPost('adminAuth', { password: pw }); })
-      .then(function () { APP.adminUnlocked = true; markAdminUnlockedThisTab(); renderShell(); })
+      .then(function () {
+        markSummaryUnlockedThisTab();
+        if (document.getElementById('summaryPwGo')) onUnlocked(); // ถ้าสลับแท็บไปแล้วระหว่างรอ ไม่ต้องเด้งกลับมาหน้านี้
+      })
       .catch(function (e) { toast(e.message || String(e), true); });
   }
   goBtn.addEventListener('click', submitPw);
-  document.getElementById('adminPw').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') submitPw(); });
+  document.getElementById('summaryPw').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') submitPw(); });
+  document.getElementById('summaryPw').focus();
 }
 
 /* ===================== ADMIN MODE ===================== */
@@ -1690,6 +1691,7 @@ function renderAdminSelfDev() {
 // เรียงตามคะแนนรวมมาก→น้อยเป็นค่าเริ่มต้นเสมอ และกรองตามกลุ่มเงินพิเศษได้ (Support/Sales Field/Sales Online — ตรงกับ INCENTIVE_GROUPS ฝั่ง Backend)
 var SUMMARY_GROUP_OPTIONS = ['Support', 'Sales Field', 'Sales Online'];
 function renderAdminSummary() {
+  if (!isSummaryUnlockedThisTab()) { renderSummaryPasswordGate(renderAdminSummary); return; } // ต้องใส่รหัสผ่านก่อนเห็นคะแนน/เงินของทุกคน
   var groupFilterOptions = '<option value="">ทั้งหมด</option>' + SUMMARY_GROUP_OPTIONS.map(function (g) { return '<option value="' + g + '">' + g + '</option>'; }).join('');
   var html =
     '<div class="card"><h3>🏆 สรุปคะแนน/เงิน</h3><div class="cardSubtitle">ภาพรวม Performance Score, สิทธิ์เงินพิเศษ และ Reward Points ของทุกคนในเดือนที่เลือก</div>' +
