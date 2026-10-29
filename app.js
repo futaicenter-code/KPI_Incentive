@@ -118,7 +118,8 @@ function getInitialMode() { return 'admin'; }
 var APP = { mode: getInitialMode(), employees: [], departments: [], errorTypes: [], severityLevels: [], impactOptions: [], workTypesByDept: {}, attendanceStatuses: [], leaveTypes: [], reportRewardDefaults: { self: null, external: null }, goodDeedPoints: null, month: null, year: null, tab: null, adminUnlocked: false };
 
 // จำว่าผ่านรหัสผ่านหน้า "สรุปคะแนน/เงิน" แล้วในแท็บนี้ (sessionStorage = อยู่แค่แท็บนี้ ปิดแท็บแล้วต้องใส่ใหม่)
-// รหัสผ่านเดิมที่เคยใช้เข้าโหมด Admin (Cfg_AdminPassword) ย้ายมาล็อกเฉพาะหน้านี้แทน — หน้าอื่นเข้าได้เลยไม่ต้องใส่รหัส
+// รหัสผ่านเดิมที่เคยใช้เข้าโหมด Admin (Cfg_AdminPassword) ย้ายมาล็อกบางหน้าแทน: Dashboard, ประเมิน Work Score, คะแนนพัฒนาตัวเอง, สรุปคะแนน/เงิน, สรุปรายปี, จัดการพนักงาน
+// (รหัสเดียวกัน ใส่ครั้งเดียวผ่านทุกหน้าในแท็บนี้) หน้าที่เหลือ (Error, Good Deed, Attendance, ปฏิทินบริษัท) เข้าได้เลยไม่ต้องใส่รหัส
 function isSummaryUnlockedThisTab() {
   try { return sessionStorage.getItem('futai_summary_unlocked') === '1'; } catch (e) { return false; }
 }
@@ -305,9 +306,9 @@ function renderShell() {
 /* ===================== หน้า "สรุปคะแนน/เงิน": กล่องกรอกรหัสผ่าน ===================== */
 // ใช้รหัสผ่านตัวเดิม (Cfg_AdminPassword ในชีต Config) ตรวจผ่าน action adminAuth เดิม — ถ้ายังเป็น PENDING = ยังไม่ล็อก (ใส่อะไรก็เข้าได้)
 // หมายเหตุ: เป็นการกันคนไม่รู้รหัสไม่ให้เปิดหน้านี้ในเว็บ ไม่ใช่ระบบ Login เต็มรูปแบบ (ตามสเปกเดิมที่ตั้งไว้)
-function renderSummaryPasswordGate(onUnlocked) {
-  var html = '<div class="card"><h3>🔒 สรุปคะแนน/เงิน</h3>' +
-    '<div class="cardSubtitle">หน้านี้มีรหัสผ่าน — ใส่รหัสผ่านเพื่อดูคะแนนรวมและเงินพิเศษของทุกคน</div>' +
+function renderSummaryPasswordGate(onUnlocked, pageTitle) {
+  var html = '<div class="card"><h3>🔒 ' + esc(pageTitle || 'สรุปคะแนน/เงิน') + '</h3>' +
+    '<div class="cardSubtitle">หน้านี้มีรหัสผ่าน — ใส่รหัสผ่านเพื่อเข้าใช้งาน (ใส่ครั้งเดียวผ่านทุกหน้าที่ล็อกในแท็บนี้)</div>' +
     '<label>รหัสผ่าน</label><input type="password" id="summaryPw" autocomplete="off">' +
     '<button class="btn" id="summaryPwGo">เข้าดูหน้านี้</button>' +
     '</div>';
@@ -368,6 +369,7 @@ function openAdminTab(key) {
 // UI/UX Redesign เท่านั้น — ไม่มี Action/Backend ใหม่ ใช้ข้อมูลจาก action "companyMonthlyScores" เดิม
 // (ตัวเดียวกับที่แท็บ "สรุปคะแนน/เงิน" ใช้อยู่แล้ว) แค่กรองมาแสดงเป็น Stat Card ของพนักงาน 1 คนที่เลือก
 function renderAdminDashboard() {
+  if (!isSummaryUnlockedThisTab()) { renderSummaryPasswordGate(renderAdminDashboard, 'Dashboard'); return; } // ล็อกด้วยรหัสเดียวกับหน้าอื่นที่มีรหัส
   var html = monthPickerHtml('db', APP.month, APP.year) +
     '<div class="card"><label>เลือกพนักงาน</label><select id="dbEmp"><option value="">— เลือกชื่อ —</option>' + employeeOptions(APP.employees) + '</select></div>' +
     '<div id="dbStats"></div>';
@@ -1268,6 +1270,7 @@ function renderAdminCalendar() {
 // ตามที่พี่ขอ (ไม่ต้องการให้กรอกข้อมูลชุดเดียวกันได้จาก 2 ที่) การ์ดนี้ในหน้า Work Score จึงเป็นจุดเดียวที่กรอกยอดขายรายเดือน
 // ของเซลส์วิ่ง/เซลส์ออนไลน์ได้แล้วทั้งระบบ (ไม่มีตารางสรุปยอดรวมทุกคนพร้อมกันอีกต่อไป ต้องเลือกดูทีละคนจากตรงนี้)
 function renderAdminWorkScore() {
+  if (!isSummaryUnlockedThisTab()) { renderSummaryPasswordGate(renderAdminWorkScore, 'ประเมิน Work Score'); return; } // ล็อกด้วยรหัสเดียวกับหน้าอื่นที่มีรหัส
   var eligible = APP.employees.slice(); // ทุกแผนก รวม Support & Strategy (กิ๊ฟ) — เดิมตัดแผนกนี้ออก ยกเลิกแล้วตามที่พี่สั่ง
   var html =
     '<div class="card"><h3>🎯 Performance Evaluation</h3><div class="cardSubtitle">ประเมิน Work Score เต็ม 20 — ฉันเป็นผู้ประเมินให้ทุกคนโดยตรง ไม่มีการประเมินตนเองหรือเฉลี่ยจากลูกทีม</div>' +
@@ -1549,6 +1552,7 @@ function renderAdminWorkScore() {
 // ทุกแผนกรวมถึง Support & Strategy เลือกให้คะแนนได้ (เหมือน Work Score)
 var _lastSelfDevEvaluator = ''; // จำชื่อผู้ประเมินล่าสุดไว้ในหน้าเว็บ (ในหน่วยความจำเท่านั้น) ไม่ต้องพิมพ์ใหม่ทุกคน
 function renderAdminSelfDev() {
+  if (!isSummaryUnlockedThisTab()) { renderSummaryPasswordGate(renderAdminSelfDev, 'คะแนนพัฒนาตัวเอง'); return; } // ล็อกด้วยรหัสเดียวกับหน้าอื่นที่มีรหัส
   var eligible = APP.employees.slice(); // ทุกแผนก รวม Support & Strategy (กิ๊ฟ) — เดิมตัดแผนกนี้ออก ยกเลิกแล้วตามที่พี่สั่ง
   var html =
     '<div class="card"><h3>🌱 คะแนนการพัฒนาตัวเอง</h3><div class="cardSubtitle">พี่ให้คะแนนเองทุกเดือน (เหมือน Work Score) — ใช้เมื่อโครงสร้างคะแนนของเดือนนั้นมีส่วนนี้ (ตอนนี้เริ่มตั้งแต่ ต.ค. 2026 เต็ม 10)</div>' +
@@ -1864,6 +1868,7 @@ var ATT_VIEW_METRICS = [
 ];
 var _annualRenderSeq = 0; // นับครั้งที่เปิดหน้า "สรุปรายปี" — คำตอบของการเปิดหน้ารอบก่อน (ที่มาช้า) จะถูกทิ้ง ไม่ไปทับตารางของรอบปัจจุบัน
 function renderAdminAnnualSummary() {
+  if (!isSummaryUnlockedThisTab()) { renderSummaryPasswordGate(renderAdminAnnualSummary, 'สรุปรายปี'); return; } // ล็อกด้วยรหัสเดียวกับหน้าอื่นที่มีรหัส
   var myRender = ++_annualRenderSeq;
   var MONTHS_TH = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
   function miniYearMonthSelectHtml(idPrefix, month, year) {
@@ -2084,6 +2089,7 @@ function renderAdminAnnualSummary() {
 // พนักงานทดลองงาน) ของคนที่มีอยู่แล้วในระบบเท่านั้น — คนละคอลัมน์กับ Error/Attendance/Work Score เลย ไม่กระทบสูตรคำนวณ
 // คะแนนใดๆ ทั้งสิ้น พอติ๊กเปิดสิทธิ์ เดือนที่เปิดดู (รวมเดือนก่อนหน้าถ้าย้อนไปดู) จะคำนวณเงินพิเศษใหม่สดทันที
 function renderAdminEmployees() {
+  if (!isSummaryUnlockedThisTab()) { renderSummaryPasswordGate(renderAdminEmployees, 'จัดการพนักงาน'); return; } // ล็อกด้วยรหัสเดียวกับหน้าอื่นที่มีรหัส
   var html =
     '<div class="card"><h3>👤 จัดการพนักงาน</h3><div class="cardSubtitle">แก้ไข "กลุ่มเงินพิเศษ" และ "สิทธิ์เงินพิเศษ" ของพนักงานที่มีอยู่แล้ว — เพิ่มพนักงานใหม่ครั้งแรกยังต้องเพิ่มในชีต Employees เอง</div>' +
     '<div class="calloutBox mt0">ติ๊ก "มีสิทธิ์รับเงินพิเศษ" เมื่อพนักงานผ่านโปรแล้วพร้อมรับเงินก้อนนี้ — ก่อนหน้านั้นบันทึก Error/Attendance/Work Score ได้ตามปกติทุกคนเหมือนกันหมด ไม่กระทบสูตรคำนวณคะแนนใดๆ เลย แค่ยังไม่ได้รับเงินก้อนจนกว่าจะติ๊กเปิดให้<br><br>' +
